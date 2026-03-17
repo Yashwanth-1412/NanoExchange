@@ -1,0 +1,19 @@
+quantlink/
+├── CMakeLists.txt
+├── src/
+│   ├── types.h                  <--
+│   │
+│   ├── engine/                  <-- THE BRAINS
+│   │   ├── order.h              <-- Struct for the linked-list node (can be inside order_book.h)
+│   │   ├── order_book.h         <-- Single-instrument logic (match, insert, cancel)
+│   │   ├── order_book.cpp
+│   │   ├── matching_engine.h    <-- Multi-instrument router (holds the lock-free queues)
+│   │   └── matching_engine.cpp  <-- Polls the inbound queue, calls order_books_[ticker].processOrder()
+│   │
+│   ├── network/                 <-- THE OUTSIDE WORLD
+│   │   ├── ouch_gateway.h       <-- Reads TCP bytes, pushes to inbound lock-free queue
+│   │   ├── itch_publisher.h     <-- Polls outbound market update queue, blasts UDP bytes
+│   │   └── tcp_server.h         <-- Low-level socket wrappers
+│ 
+│   
+└── main.cpp                     <-- Wires it all together
