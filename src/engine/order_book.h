@@ -4,6 +4,7 @@
 #include <functional>
 #include <unordered_map>
 #include <map>
+#include <utility>
 #include "../types.h"
 #include "QuantLink/Lib/memory/object_pool.h"
 #include "QuantLink/Lib/logging/logger.h"
@@ -15,7 +16,7 @@ struct MEOrder {
     TickerId tickerId_;
     ClientId clientId_;
     OrderId clientOrderId_;      
-    OrderId orderId_;
+    OrderId marketOrderId_;
     OrderType orderType_;
 
     Price price_;
@@ -27,13 +28,13 @@ struct MEOrder {
     MEOrder* prev_ = nullptr;
 
     MEOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
-            OrderId orderId, OrderType orderType, Price price,
+            OrderId marketOrderId, OrderType orderType, Price price,
             Quantity initialQuantity, Side side,
             MEOrder* next = nullptr, MEOrder* prev = nullptr) noexcept
         : tickerId_(tickerId),
           clientId_(clientId),
           clientOrderId_(clientOrderId),
-          orderId_(orderId),
+          marketOrderId_(marketOrderId),
           orderType_(orderType),
           price_(price),
           initialQuantity_(initialQuantity),
@@ -61,14 +62,18 @@ private:
     quantlink::ObjectPool<MEOrder> pool_;
     std::map<Price, PriceLevel, std::less<Price>> asks_;
     std::map<Price, PriceLevel, std::greater<Price>> bids_;
-    std::unordered_map<OrderId, MEOrder*> orders_;
+    std::unordered_map<ClientId, std::unordered_map<OrderId, MEOrder*>> orders_;    //ClientId, ClientOrderId
+    
+
+    OrderId nextMarketOrderId = 1; 
+
 
     auto insert(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
-                OrderId orderId,OrderType orderType, Price price,
+                OrderId marketOrderId,OrderType orderType, Price price,
                 Quantity initialQuantity, Side side) {
 
         MEOrder* order = pool_.allocate(tickerId, clientId, clientOrderId,
-                                        orderId, orderType, price, initialQuantity, side);
+                                        marketOrderId, orderType, price, initialQuantity, side);
 
         PriceLevel& priceLevel = (side == Side::BUY) ? bids_[price] : asks_[price];
 
@@ -82,15 +87,12 @@ private:
             priceLevel.tail = order;      
         }
 
-        orders_[orderId] = order;
+        orders_[clientId][clientOrderId] = order;
     }
 
 
-    auto remove(OrderId orderId) {
-        auto it = orders_.find(orderId);
-        if (it == orders_.end()) return;
-        
-        MEOrder* order = it->second; 
+    auto remove(MEOrder* order) {
+
         Price price = order->price_;
         PriceLevel& priceLevel = (order->side_ == Side::BUY) ? bids_[price] : asks_[price];
 
@@ -105,12 +107,19 @@ private:
             else asks_.erase(price);
         }
 
+        
+        auto& clientMap = orders_[order->clientId_];
+        clientMap.erase(order->clientOrderId_);
+
+        if (clientMap.empty()) {
+            orders_.erase(order->clientId_);                            // Clean up the client to save RAM!
+        }
         pool_.deallocate(order);
-        orders_.erase(orderId);
+        
     }
 
 
-    auto match(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderId orderId,
+    auto match(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderId marketOrderId,
                 OrderType orderType, Price price, Quantity initialQuantity, Side side) {
         
         Quantity remainingQuantity = initialQuantity;
@@ -134,7 +143,7 @@ private:
                     //TODO:notify matchingEngine_ of fill here ----------------------------------------------------------------------
                     //TODO:notify matchingEngine_ of fill here ----------------------------------------------------------------------
 
-                    if (restingOrder->remainingQuantity_ == 0) remove(restingOrder->orderId_);
+                    if (restingOrder->remainingQuantity_ == 0) remove(restingOrder);
                 }
 
                 it = oppositeSide.begin(); //reevaluate after removals
@@ -158,21 +167,41 @@ public:
             pool_(size)
     {}
 
-    auto addOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderId orderId,
+    auto addOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
                 OrderType orderType, Price price, Quantity initialQuantity, Side side) noexcept {
+        
+        OrderId marketOrderId = nextMarketOrderId++;
 
-
-        Quantity remainingQuantity = match(tickerId, clientId, clientOrderId, orderId, 
+        Quantity remainingQuantity = match(tickerId, clientId, clientOrderId, marketOrderId, 
                                         orderType, price, initialQuantity, side);
 
         if (remainingQuantity > 0 && orderType == OrderType::GoodTillCancel ) {
-            insert(tickerId, clientId, clientOrderId, orderId,orderType, price, remainingQuantity, side);
+            insert(tickerId, clientId, clientOrderId, marketOrderId, orderType, price, remainingQuantity, side);
 
             //TODO:notify matchingEngine_ of insertion
         }
     }
 
-    auto cancelOrder (){}
+    auto cancelOrder (TickerId tickerId, ClientId clientId, OrderId clientOrderId){
+
+        auto clientIt = orders_.find(clientId);
+        if (UNLIKELY(clientIt == orders_.end())) {
+
+            // TODO: notify matchingEngine_ CANCEL REJECTED
+        }
+
+        auto clientOrderIt = clientIt->second.find(clientOrderId);
+        if (UNLIKELY(clientOrderIt == clientIt->second.end())) {
+
+            // TODO: notify matching_ CANCEL REJECTED
+        }
+
+        MEOrder* order = clientOrderIt->second;
+        // TODO: notify matching_ CANCEL MARKET
+        // TODO: notify matching_ CANCEL RESPONSE
+
+        remove(order);
+    }
 
 
     
