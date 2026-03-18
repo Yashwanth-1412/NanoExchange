@@ -1,15 +1,15 @@
 #pragma once
 #include <algorithm>
-#include <cstdint>
+#include <array>
 #include <functional>
 #include <unordered_map>
 #include <map>
-#include <utility>
 #include "../types.h"
 #include "QuantLink/Lib/memory/object_pool.h"
 #include "QuantLink/Lib/logging/logger.h"
 #include "QuantLink/Lib/common/macros.h"
 
+constexpr size_t MAX_PRICE_LEVELS = 256000;
 
 struct MEOrder {
 
@@ -46,8 +46,18 @@ struct MEOrder {
 };
 
 struct PriceLevel {
+    Price price_;
+
     MEOrder* head = nullptr;
     MEOrder* tail = nullptr;
+
+    PriceLevel* next_ = nullptr;
+    PriceLevel* prev_ = nullptr;
+
+    PriceLevel() = default;  
+    PriceLevel (Price price) : price_(price)
+    {}
+    
 };
 
 class MatchingEngine;
@@ -58,15 +68,71 @@ private:
     MatchingEngine* matchingEngine_;
     quantlink::Logger* logger_;
     
-    size_t size_;
     quantlink::ObjectPool<MEOrder> pool_;
-    std::map<Price, PriceLevel, std::less<Price>> asks_;
-    std::map<Price, PriceLevel, std::greater<Price>> bids_;
+    std::array<PriceLevel, MAX_PRICE_LEVELS> bids_{};
+    std::array<PriceLevel, MAX_PRICE_LEVELS> asks_{};
+
+    PriceLevel* best_bid_ = nullptr;
+    PriceLevel* best_ask_ = nullptr;
+    
     std::unordered_map<ClientId, std::unordered_map<OrderId, MEOrder*>> orders_;    //ClientId, ClientOrderId
     
 
     OrderId nextMarketOrderId = 1; 
 
+    auto insertPricelevel (PriceLevel* priceLevel, Side side) {
+        if (side == Side::BUY) {
+            // Bids: Sorted Highest to Lowest
+            if (!best_bid_) best_bid_ = priceLevel;
+            
+            else if (priceLevel->price_ > best_bid_->price_) {
+                priceLevel->next_ = best_bid_;
+                best_bid_->prev_ = priceLevel;
+                best_bid_ = priceLevel;
+            } 
+            else {
+                PriceLevel* curr = best_bid_;
+                while (curr->next_ && curr->next_->price_ > priceLevel->price_) curr = curr->next_;
+
+                priceLevel->next_ = curr->next_;
+                if (curr->next_) curr->next_->prev_ = priceLevel;
+                curr->next_ = priceLevel;
+                priceLevel->prev_ = curr;
+            }
+        } 
+        else {
+            // Asks: Sorted Lowest to Highest
+            if (!best_ask_) best_ask_ = priceLevel;
+
+            else if (priceLevel->price_ < best_ask_->price_) {
+                priceLevel->next_ = best_ask_;
+                best_ask_->prev_ = priceLevel;
+                best_ask_ = priceLevel;
+            } 
+            else {
+                PriceLevel* curr = best_ask_;
+                while (curr->next_ && curr->next_->price_ < priceLevel->price_) curr = curr->next_;
+
+                priceLevel->next_ = curr->next_;
+                if (curr->next_) curr->next_->prev_ = priceLevel;
+                curr->next_ = priceLevel;
+                priceLevel->prev_ = curr;
+            }
+        }
+    }
+
+    
+    auto removePriceLevel (PriceLevel* priceLevel, Side side) {
+        if (priceLevel->next_) priceLevel->next_->prev_ = priceLevel->prev_;
+        if (priceLevel->prev_) priceLevel->prev_->next_ = priceLevel->next_;
+
+        if (side == Side::BUY && best_bid_ == priceLevel) best_bid_ = priceLevel->next_;
+        if (side == Side::SELL && best_ask_ == priceLevel) best_ask_ = priceLevel->next_;
+
+        priceLevel->next_ = nullptr;
+        priceLevel->prev_ = nullptr;
+    }
+    
 
     auto insert(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
                 OrderId marketOrderId,OrderType orderType, Price price,
@@ -77,15 +143,18 @@ private:
 
         PriceLevel& priceLevel = (side == Side::BUY) ? bids_[price] : asks_[price];
 
-        if (priceLevel.head == nullptr) {
-            priceLevel.head = order;                                   // 1st Order
+        if (priceLevel.head == nullptr) {                              // Adding the Order First
+            priceLevel.head = order;                                   // 1st Order 
             priceLevel.tail = order;
+            insertPricelevel(&priceLevel, side);
         } 
+
         else {
             order->prev_ = priceLevel.tail;
             priceLevel.tail->next_ = order;
             priceLevel.tail = order;      
         }
+        
 
         orders_[clientId][clientOrderId] = order;
     }
@@ -103,8 +172,7 @@ private:
         else priceLevel.tail = order->prev_;                                //Order is Tail
 
         if (priceLevel.head == nullptr) {
-            if (order->side_ == Side::BUY) bids_.erase(price);          //Only Order
-            else asks_.erase(price);
+            removePriceLevel(&priceLevel, order->side_);          //Only Order
         }
 
         
@@ -120,38 +188,54 @@ private:
 
 
     auto match(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderId marketOrderId,
-                OrderType orderType, Price price, Quantity initialQuantity, Side side) {
-        
+            OrderType orderType, Price price, Quantity initialQuantity, Side side) {
+
         Quantity remainingQuantity = initialQuantity;
 
-        auto matchAgainst = [&](auto& oppositeSide) {
-            for (auto it = oppositeSide.begin(); it != oppositeSide.end() && remainingQuantity > 0;) {
-                Price levelPrice = it->first;
+        if (side == Side::BUY) {
+            PriceLevel* level = best_ask_;
 
-                if ((side == Side::BUY && price < levelPrice) ||
-                    (side == Side::SELL && price > levelPrice)) break;
+            while (level && remainingQuantity > 0) {
+                if (price < level->price_) break;
 
-                PriceLevel& priceLevel = it->second;
-
-                while (priceLevel.head != nullptr && remainingQuantity > 0) {
-                    MEOrder* restingOrder = priceLevel.head;
+                while (level->head && remainingQuantity > 0) {
+                    MEOrder* restingOrder = level->head;
                     Quantity fill = std::min(remainingQuantity, restingOrder->remainingQuantity_);
 
-                    remainingQuantity -= fill;
+                    remainingQuantity                -= fill;
                     restingOrder->remainingQuantity_ -= fill;
 
-                    //TODO:notify matchingEngine_ of fill here ----------------------------------------------------------------------
-                    //TODO:notify matchingEngine_ of fill here ----------------------------------------------------------------------
+                    // TODO: notify matchingEngine_ of fill
+                    // TODO: notify matchingEngine_ of fill
 
                     if (restingOrder->remainingQuantity_ == 0) remove(restingOrder);
                 }
 
-                it = oppositeSide.begin(); //reevaluate after removals
+                level = best_ask_;   // re-fetch: level may have been removed if it emptied
             }
-        };
+        } 
+        else {
+            PriceLevel* level = best_bid_;
 
-        if (side == Side::BUY) matchAgainst(asks_);
-        else matchAgainst(bids_);
+            while (level && remainingQuantity > 0) {
+                if (price > level->price_) break;
+
+                while (level->head && remainingQuantity > 0) {
+                    MEOrder* restingOrder = level->head;
+                    Quantity fill = std::min(remainingQuantity, restingOrder->remainingQuantity_);
+
+                    remainingQuantity                -= fill;
+                    restingOrder->remainingQuantity_ -= fill;
+
+                    // TODO: notify matchingEngine_ of fill
+                    // TODO: notify matchingEngine_ of fill
+
+                    if (restingOrder->remainingQuantity_ == 0) remove(restingOrder);
+                }
+
+                level = best_bid_;   // re-fetch: level may have been removed if it emptied
+            }
+        }
 
         return remainingQuantity;
     }
@@ -163,7 +247,6 @@ public:
             tickerId_(tickerId), 
             matchingEngine_(matchingEngine), 
             logger_(logger),
-            size_(size),
             pool_(size)
     {}
 
@@ -204,9 +287,9 @@ public:
     }
 
 
+
+
+
     
-
-
-
     
 };
