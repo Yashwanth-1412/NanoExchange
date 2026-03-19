@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <map>
 #include "../types.h"
-#include "QuantLink/Lib/memory/object_pool.h"
+#include "QuantLink/Lib/memory/object_pool_list.h"
 #include "QuantLink/Lib/logging/logger.h"
 #include "QuantLink/Lib/common/macros.h"
 
@@ -24,6 +24,8 @@ struct MEOrder {
 
     MEOrder* next_ = nullptr;
     MEOrder* prev_ = nullptr;
+
+    MEOrder() = default;
 
     MEOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
             OrderId marketOrderId, OrderType orderType, Price price,
@@ -186,12 +188,14 @@ public:
         if (UNLIKELY(clientIt == orders_.end())) {
 
             // TODO: notify matchingEngine_ CANCEL REJECTED
+            return;
         }
 
         auto clientOrderIt = clientIt->second.find(clientOrderId);
         if (UNLIKELY(clientOrderIt == clientIt->second.end())) {
 
             // TODO: notify matching_ CANCEL REJECTED
+            return;
         }
 
         MEOrder* order = clientOrderIt->second;

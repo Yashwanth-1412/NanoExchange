@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <map>
 #include "../types.h"
-#include "QuantLink/Lib/memory/object_pool.h"
+#include "QuantLink/Lib/memory/object_pool_list.h"
 #include "QuantLink/Lib/logging/logger.h"
 #include "QuantLink/Lib/common/macros.h"
 
@@ -26,6 +26,8 @@ struct MEOrder {
 
     MEOrder* next_ = nullptr;
     MEOrder* prev_ = nullptr;
+
+    MEOrder () = default;
 
     MEOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
             OrderId marketOrderId, OrderType orderType, Price price,
@@ -69,8 +71,9 @@ private:
     quantlink::Logger* logger_;
     
     quantlink::ObjectPool<MEOrder> pool_;
-    std::array<PriceLevel, MAX_PRICE_LEVELS> bids_{};
-    std::array<PriceLevel, MAX_PRICE_LEVELS> asks_{};
+    quantlink::ObjectPool<PriceLevel> priceLevelPool_; // <-- Pool for fast PriceLevel allocation
+    std::array<PriceLevel*, MAX_PRICE_LEVELS> bids_{}; // <-- Changed to pointers
+    std::array<PriceLevel*, MAX_PRICE_LEVELS> asks_{}; // <-- Changed to pointers
 
     PriceLevel* best_bid_ = nullptr;
     PriceLevel* best_ask_ = nullptr;
@@ -129,8 +132,11 @@ private:
         if (side == Side::BUY && best_bid_ == priceLevel) best_bid_ = priceLevel->next_;
         if (side == Side::SELL && best_ask_ == priceLevel) best_ask_ = priceLevel->next_;
 
-        priceLevel->next_ = nullptr;
-        priceLevel->prev_ = nullptr;
+        // Clear the array slot and return memory to the pool
+        if (side == Side::BUY) bids_[priceLevel->price_] = nullptr;
+        else asks_[priceLevel->price_] = nullptr;
+
+        priceLevelPool_.deallocate(priceLevel);
     }
     
 
@@ -141,18 +147,22 @@ private:
         MEOrder* order = pool_.allocate(tickerId, clientId, clientOrderId,
                                         marketOrderId, orderType, price, initialQuantity, side);
 
-        PriceLevel& priceLevel = (side == Side::BUY) ? bids_[price] : asks_[price];
+        PriceLevel*& priceLevel = (side == Side::BUY) ? bids_[price] : asks_[price];
 
-        if (priceLevel.head == nullptr) {                              // Adding the Order First
-            priceLevel.head = order;                                   // 1st Order 
-            priceLevel.tail = order;
-            insertPricelevel(&priceLevel, side);
+        // Allocate a new PriceLevel ONLY if it doesn't exist yet
+        if (UNLIKELY(priceLevel == nullptr)) {
+            priceLevel = priceLevelPool_.allocate(price);
+            insertPricelevel(priceLevel, side); // Link it into the active market
+        }
+
+        if (priceLevel->head == nullptr) {                              // Adding the Order First
+            priceLevel->head = order;                                   // 1st Order 
+            priceLevel->tail = order;
         } 
-
         else {
-            order->prev_ = priceLevel.tail;
-            priceLevel.tail->next_ = order;
-            priceLevel.tail = order;      
+            order->prev_ = priceLevel->tail;
+            priceLevel->tail->next_ = order;
+            priceLevel->tail = order;      
         }
         
 
@@ -163,16 +173,16 @@ private:
     auto remove(MEOrder* order) {
 
         Price price = order->price_;
-        PriceLevel& priceLevel = (order->side_ == Side::BUY) ? bids_[price] : asks_[price];
+        PriceLevel* priceLevel = (order->side_ == Side::BUY) ? bids_[price] : asks_[price];
 
         if (order->prev_ != nullptr) order->prev_->next_ = order->next_;    //Order is Head
-        else priceLevel.head = order->next_;
+        else priceLevel->head = order->next_;
 
         if (order->next_ != nullptr) order->next_->prev_ = order->prev_;
-        else priceLevel.tail = order->prev_;                                //Order is Tail
+        else priceLevel->tail = order->prev_;                                //Order is Tail
 
-        if (priceLevel.head == nullptr) {
-            removePriceLevel(&priceLevel, order->side_);          //Only Order
+        if (priceLevel->head == nullptr) {
+            removePriceLevel(priceLevel, order->side_);          //Only Order
         }
 
         
@@ -247,8 +257,13 @@ public:
             tickerId_(tickerId), 
             matchingEngine_(matchingEngine), 
             logger_(logger),
-            pool_(size)
-    {}
+            pool_(size),
+            priceLevelPool_(MAX_PRICE_LEVELS) // Ensure pool is big enough
+    {
+        // Instantly zero out all pointers
+        bids_.fill(nullptr);
+        asks_.fill(nullptr);
+    }
 
     auto addOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
                 OrderType orderType, Price price, Quantity initialQuantity, Side side) noexcept {
@@ -271,12 +286,14 @@ public:
         if (UNLIKELY(clientIt == orders_.end())) {
 
             // TODO: notify matchingEngine_ CANCEL REJECTED
+            return;
         }
 
         auto clientOrderIt = clientIt->second.find(clientOrderId);
         if (UNLIKELY(clientOrderIt == clientIt->second.end())) {
 
             // TODO: notify matching_ CANCEL REJECTED
+            return;
         }
 
         MEOrder* order = clientOrderIt->second;

@@ -13,3 +13,10 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/QuantLink)
 file(GLOB SOURCES "src/*.cpp")
 add_executable(NanoExchange ${SOURCES})
 target_link_libraries(NanoExchange PRIVATE Threads::Threads)
+
+add_executable(ob_test tests/order_book_test.cpp)
+target_include_directories(ob_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
+)
+target_link_libraries(ob_test PRIVATE Threads::Threads)
