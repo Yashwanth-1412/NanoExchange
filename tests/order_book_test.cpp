@@ -5,7 +5,7 @@
 #include <iomanip>
 #include <unordered_map>
 #include <string_view>
-#include "../src/engine/order_book_array.h"
+#include "../src/engine/order_book_vector.h"
 
 // ==========================================
 // DUMMY DEPENDENCIES
@@ -35,11 +35,6 @@ static void line(const char* ch = "-", int w = 60) {
 // ==========================================
 // REALISTIC MARKET PARTICIPANT PROFILES
 // ==========================================
-//
-//  The real market has distinct participant types.
-//  Each has different behaviour, order sizes, and
-//  aggression levels — modelled here as archetypes.
-//
 struct Participant {
     ClientId    id;
     std::string name;
@@ -90,8 +85,8 @@ struct OrderBook_LiveOrder {
 
 class RealisticOrderStream {
 public:
-    RealisticOrderStream(size_t count, uint64_t seed = 42)
-        : gen_(seed), count_(count)
+    RealisticOrderStream(size_t count, OrderId startOrderId, uint64_t seed = 42)
+        : gen_(seed), count_(count), nextOrderId_(startOrderId)
     {
         // Build weighted participant selection
         for (auto& p : PARTICIPANTS)
@@ -110,7 +105,7 @@ private:
     std::vector<const Participant*> weightedPool_;
     std::vector<SimOrder>           orders_;
     std::vector<OrderBook_LiveOrder>liveOrders_;   // track what's resting
-    OrderId                         nextOrderId_ = 100000;
+    OrderId                         nextOrderId_;
 
     // Mid price drifts slowly like a real market
     Price   mid_       = 10000;   // $100.00 in ticks
@@ -139,8 +134,6 @@ private:
                             (pct(gen_) < static_cast<int>(p->cancelRate * 100));
 
             if (doCancel) {
-                // Pick a random live order from THIS client if possible,
-                // else any live order
                 std::vector<OrderBook_LiveOrder*> mine;
                 for (auto& lo : liveOrders_)
                     if (lo.clientId == p->id) mine.push_back(&lo);
@@ -154,22 +147,26 @@ private:
                     target = &liveOrders_[pick(gen_)];
                 }
 
+                // FIX 1: Safely copy the IDs *before* calling erase/remove_if
+                ClientId tgtClientId = target->clientId;
+                OrderId  tgtOrderId  = target->clientOrderId;
+
                 orders_.push_back({
-                    target->clientId,
+                    tgtClientId,
                     0,                      // unused for cancel
                     OrderType::GoodTillCancel,
                     0, 0,
                     Side::BUY,
                     true,
-                    target->clientOrderId
+                    tgtOrderId
                 });
 
-                // Remove from live tracker
+                // Remove from live tracker using the safe copies!
                 liveOrders_.erase(
                     std::remove_if(liveOrders_.begin(), liveOrders_.end(),
-                        [&](const OrderBook_LiveOrder& lo){
-                            return lo.clientOrderId == target->clientOrderId
-                                && lo.clientId      == target->clientId;
+                        [=](const OrderBook_LiveOrder& lo){
+                            return lo.clientOrderId == tgtOrderId
+                                && lo.clientId      == tgtClientId;
                         }),
                     liveOrders_.end());
 
@@ -320,10 +317,10 @@ void runThroughputBenchmark(MEOrderBook* book, size_t numOrders) {
                   << (p.aggressive ? "  [taker]" : "  [maker]") << '\n';
     std::cout << col::RST << '\n';
 
-    // Generate realistic order stream
+    // FIX 2: Added startOrderId to completely separate warmup IDs from Main IDs
     std::cout << "Generating " << numOrders << " realistic orders ("
               << PARTICIPANTS.size() << " participant types)...\n";
-    RealisticOrderStream stream(numOrders);
+    RealisticOrderStream stream(numOrders, 100000); 
     const auto& orders = stream.orders();
 
     size_t addCount    = 0;
@@ -334,9 +331,9 @@ void runThroughputBenchmark(MEOrderBook* book, size_t numOrders) {
     std::cout << "  " << addCount    << " add orders\n";
     std::cout << "  " << cancelCount << " cancel orders\n\n";
 
-    // Warmup — same participant mix, same price range
+    // Warmup uses 2,000,000 as starting ID so they do not overlap
     std::cout << "Warmup (100 000 orders from same stream)...\n";
-    RealisticOrderStream warmupStream(100000, 99);
+    RealisticOrderStream warmupStream(100000, 2000000, 99);
     for (auto& o : warmupStream.orders()) {
         if (o.isCancel)
             book->cancelOrder(1, o.clientId, o.cancelTargetId);
@@ -365,7 +362,6 @@ void runThroughputBenchmark(MEOrderBook* book, size_t numOrders) {
     double nsPerOrder    = static_cast<double>(ns) / numOrders;
     double ordersPerSec  = numOrders / sec;
 
-    // Per-operation breakdown (rough — both types in same timed loop)
     double addFraction    = static_cast<double>(addCount)    / numOrders;
     double cancelFraction = static_cast<double>(cancelCount) / numOrders;
 
@@ -387,8 +383,11 @@ void runThroughputBenchmark(MEOrderBook* book, size_t numOrders) {
     // Participant stats
     std::cout << "\n" << col::DIM << "  Participant breakdown:\n";
     std::unordered_map<ClientId, size_t> clientCounts;
+    
+    // FIX 3: Removed redundant ternary
     for (auto& o : orders)
-        ++clientCounts[o.isCancel ? o.clientId : o.clientId];
+        ++clientCounts[o.clientId];
+        
     for (auto& p : PARTICIPANTS) {
         auto it = clientCounts.find(p.id);
         size_t cnt = (it != clientCounts.end()) ? it->second : 0;

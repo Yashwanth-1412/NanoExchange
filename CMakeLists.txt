@@ -20,3 +20,11 @@ target_include_directories(ob_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
 )
 target_link_libraries(ob_test PRIVATE Threads::Threads)
+
+
+add_executable(ob_compare tests/ob_compare.cpp)
+target_include_directories(ob_compare PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
+)
+target_link_libraries(ob_compare PRIVATE Threads::Threads)

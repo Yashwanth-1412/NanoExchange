@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <unordered_map>
 #include <map>
@@ -8,9 +9,11 @@
 #include "QuantLink/Lib/logging/logger.h"
 #include "QuantLink/Lib/common/macros.h"
 
+constexpr size_t MAX_PRICE_LEVELS = 256000;
+
+
 
 class MatchingEngine;
-
 class MEOrderBook {
 
 private:
@@ -18,14 +21,21 @@ private:
     MatchingEngine* matchingEngine_;
     quantlink::Logger* logger_;
     
-    size_t size_;
     quantlink::ObjectPool<MEOrder> pool_;
-    std::map<Price, PriceLevel, std::less<Price>> asks_;
-    std::map<Price, PriceLevel, std::greater<Price>> bids_;
+    std::vector<PriceLevel> bids_;
+    std::vector<PriceLevel> asks_;
+
+    PriceLevel* best_bid_ = nullptr;
+    PriceLevel* best_ask_ = nullptr;
+    
     std::unordered_map<ClientId, std::unordered_map<OrderId, MEOrder*>> orders_;    //ClientId, ClientOrderId
     
+
     OrderId nextMarketOrderId = 1; 
 
+    auto insertPricelevel(PriceLevel* priceLevel, Side side) -> void;
+
+    auto removePriceLevel(PriceLevel* priceLevel, Side side) -> void;
 
     auto insert(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
                 OrderId marketOrderId, OrderType orderType, Price price,
@@ -34,17 +44,17 @@ private:
     auto remove(MEOrder* order) -> void;
 
     auto match(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderId marketOrderId,
-                OrderType orderType, Price price, Quantity initialQuantity, Side side) -> Quantity;
+            OrderType orderType, Price price, Quantity initialQuantity, Side side) -> Quantity;
 
 
 public:
 
-    explicit MEOrderBook(size_t size, TickerId tickerId, MatchingEngine* matchingEngine/*, quantlink::Logger* logger*/);
+    explicit MEOrderBook(size_t size, TickerId tickerId, MatchingEngine* matchingEngine, quantlink::Logger* logger);
 
     auto addOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
                 OrderType orderType, Price price, Quantity initialQuantity, Side side) noexcept -> void;
 
     auto cancelOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId) -> void;
 
-    
+
 };

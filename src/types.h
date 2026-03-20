@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <limits>
 
 using OrderId  = std::uint64_t;
 using Price    = std::uint64_t;
@@ -7,14 +8,16 @@ using Quantity = std::uint32_t;
 using ClientId = std::uint64_t;
 using TickerId = std::uint32_t;
 
+constexpr Price Price_INVALID = std::numeric_limits<Price>::max();
+constexpr OrderId OrderId_INVALID = std::numeric_limits<OrderId>::max();
+
 enum class Side { BUY, SELL };
 enum class OrderType { GoodTillCancel, FillAndKill };
 enum class ClientRequestType { NEW, CANCEL, MODIFY };
-enum class ResponseType { ACCEPTED, FILLED, CANCELED, MODIFIED };
+enum class ResponseType { ACCEPTED, EXECUTED, CANCELED, CANCEL_REJECTED, MODIFIED };
 enum class UpdateType { ADD, CANCEL, MODIFY, TRADE };             
 
 struct MEClientRequest {
-
     ClientRequestType action_; 
     ClientId client_id_;
     TickerId ticker_id_;      //Stock name
@@ -23,6 +26,17 @@ struct MEClientRequest {
     Side side_;
     Price price_;
     Quantity qty_;
+
+    // Default constructor
+    MEClientRequest() = default;
+
+    // Parameterized constructor
+    MEClientRequest(ClientRequestType action, ClientId client_id, TickerId ticker_id, 
+                    OrderId client_order_id, OrderType type, Side side, 
+                    Price price, Quantity qty)
+        : action_(action), client_id_(client_id), ticker_id_(ticker_id), 
+          client_order_id_(client_order_id), type_(type), side_(side), 
+          price_(price), qty_(qty) {}
 };
 
 // QUEUE 2: Outbound Private (Engine -> Gateway -> AlphaTrader)
@@ -36,6 +50,17 @@ struct MEClientResponse {
     Quantity executed_qty_;
     Price execution_price_;
     Quantity leaves_qty_;      // How much quantity is still resting
+
+    // Default constructor
+    MEClientResponse() = default;
+
+    // Parameterized constructor
+    MEClientResponse(ClientId client_id, TickerId ticker_id, OrderId client_order_id, 
+                     OrderId market_order_id, ResponseType status, Quantity executed_qty, 
+                     Price execution_price, Quantity leaves_qty)
+        : client_id_(client_id), ticker_id_(ticker_id), client_order_id_(client_order_id), 
+          market_order_id_(market_order_id), status_(status), executed_qty_(executed_qty), 
+          execution_price_(execution_price), leaves_qty_(leaves_qty) {}
 };
 
 // QUEUE 3: Outbound Public (Engine -> Publisher -> ITCH Feed)
@@ -46,5 +71,65 @@ struct MEMarketUpdate {
     Side side_;
     Price price_;
     Quantity qty_;
+
+    // Default constructor
+    MEMarketUpdate() = default;
+
+    // Parameterized constructor
+    MEMarketUpdate(TickerId ticker_id, OrderId market_order_id, UpdateType type, 
+                   Side side, Price price, Quantity qty)
+        : ticker_id_(ticker_id), market_order_id_(market_order_id), type_(type), 
+          side_(side), price_(price), qty_(qty) {}
 };
 
+
+struct MEOrder {
+
+    TickerId tickerId_;
+    ClientId clientId_;
+    OrderId clientOrderId_;      
+    OrderId marketOrderId_;
+    OrderType orderType_;
+
+    Price price_;
+    Quantity initialQuantity_;
+    Quantity remainingQuantity_;
+    Side side_;
+
+    MEOrder* next_ = nullptr;
+    MEOrder* prev_ = nullptr;
+
+    MEOrder () = default;
+
+    MEOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
+            OrderId marketOrderId, OrderType orderType, Price price,
+            Quantity initialQuantity, Side side,
+            MEOrder* next = nullptr, MEOrder* prev = nullptr) noexcept
+        : tickerId_(tickerId),
+          clientId_(clientId),
+          clientOrderId_(clientOrderId),
+          marketOrderId_(marketOrderId),
+          orderType_(orderType),
+          price_(price),
+          initialQuantity_(initialQuantity),
+          remainingQuantity_(initialQuantity),
+          side_(side),
+          next_(next),
+          prev_(prev) 
+    {}
+};
+
+struct PriceLevel {
+    Price price_;
+
+    MEOrder* head = nullptr;
+    MEOrder* tail = nullptr;
+
+    PriceLevel* next_ = nullptr;
+    PriceLevel* prev_ = nullptr;
+
+    PriceLevel() = default;  
+    PriceLevel (Price price) : price_(price)
+    {}
+    
+};

@@ -17,3 +17,29 @@ quantlink/
 │ 
 │   
 └── main.cpp                     <-- Wires it all together
+
+
+
+
+
+Round Robin Split Architecture 
+
+ [1. Rx Thread (Network In)] 
+                     Reads TCP/UDP, parses to SimOrder
+                                  |
+            +---------------------+---------------------+ 
+            |                     |                     |
+     [Inbound Q 0]         [Inbound Q 1]         [Inbound Q 2]   <-- SPSC Queues
+            |                     |                     |
+        [ME Core 0]           [ME Core 1]           [ME Core 2]  <-- The Matching Engines!
+            |                     |                     |
+     +------+------+       +------+------+       +------+------+
+     |             |       |             |       |             |
+[Client Q 0]  [MD Q 0] [Client Q 1]  [MD Q 1] [Client Q 2]  [MD Q 2] <-- SPSC Queues
+     |             |       |             |       |             |
+     +------+------+-------+      +------+-------+------+------+
+            |                                   |
+[2. Tx Thread (Private Responses)]      [3. MD Thread (Public ITCH Feed)]
+
+
+I will try to implement this.
