@@ -14,7 +14,10 @@ file(GLOB SOURCES "src/*.cpp")
 add_executable(NanoExchange ${SOURCES})
 target_link_libraries(NanoExchange PRIVATE Threads::Threads)
 
-add_executable(ob_test tests/order_book_test.cpp)
+add_executable(ob_test 
+    tests/order_book_test.cpp 
+    src/engine/order_book_vector.cpp 
+)
 target_include_directories(ob_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
@@ -28,3 +31,15 @@ target_include_directories(ob_compare PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
 )
 target_link_libraries(ob_compare PRIVATE Threads::Threads)
+
+
+add_executable(me_test
+    tests/test_matching_engine.cpp
+    src/engine/matching_engine.cpp
+    src/engine/order_book_map.cpp
+)
+target_include_directories(me_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
+)
+target_link_libraries(me_test PRIVATE Threads::Threads)

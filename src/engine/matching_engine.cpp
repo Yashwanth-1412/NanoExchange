@@ -2,20 +2,23 @@
 #include "order_book_map.h"     // Swap to order_book_vector.h to use the vector implementation
 
 
-MatchingEngine::MatchingEngine(SPSCQueue<MEClientRequest>* requests, SPSCQueue<MEClientResponse>* responses, SPSCQueue<MEMarketUpdate>* marketupdates, quantlink::Logger* logger) :
+MatchingEngine::MatchingEngine(SPSCQueue<MEClientRequest>* requests, SPSCQueue<MEClientResponse>* responses, SPSCQueue<MEMarketUpdate>* marketupdates, quantlink::Logger* logger,
+                                size_t maxOrderBooks, size_t orderBookPoolSize) :
             requests_(requests),
             responses_(responses),
             marketUpdates_(marketupdates),
+            maxOrderBooks_(maxOrderBooks),
             logger_(logger) {
 
-    for (size_t i = 0; i < MAX_ORDER_BOOKS; i++) {
-        ticker_order_book_[i] = new MEOrderBook(ORDER_BOOK_SIZE, i, this);
+    ticker_order_book_.resize(maxOrderBooks_);
+    for (size_t i = 0; i < maxOrderBooks_; i++) {
+        ticker_order_book_[i] = new MEOrderBook(orderBookPoolSize, i, this);
     }
 
 }
 
 
-inline auto MatchingEngine::processClientRequest(const MEClientRequest* request) noexcept -> void {
+auto MatchingEngine::processClientRequest(const MEClientRequest* request) noexcept -> void {
     auto orderbook = ticker_order_book_[request->ticker_id_];
     
     switch (request->action_) {

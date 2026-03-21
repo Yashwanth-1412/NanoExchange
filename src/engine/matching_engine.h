@@ -20,14 +20,16 @@ private:
     SPSCQueue<MEClientResponse>* responses_ = nullptr;
     SPSCQueue<MEMarketUpdate>* marketUpdates_ = nullptr;
 
-    std::array<MEOrderBook*, MAX_ORDER_BOOKS> ticker_order_book_;
+    std::vector<MEOrderBook*> ticker_order_book_;
+    size_t maxOrderBooks_;
     volatile bool run_ = false;
 
     quantlink::Logger* logger_;
 
 public:
 
-    MatchingEngine (SPSCQueue<MEClientRequest>* requests, SPSCQueue<MEClientResponse>* responses, SPSCQueue<MEMarketUpdate>* marketupdates, quantlink::Logger* logger);
+MatchingEngine (SPSCQueue<MEClientRequest>* requests, SPSCQueue<MEClientResponse>* responses, SPSCQueue<MEMarketUpdate>* marketupdates, quantlink::Logger* logger,
+                    size_t maxOrderBooks = MAX_ORDER_BOOKS, size_t orderBookPoolSize = ORDER_BOOK_SIZE);
 
     auto stop () {
         run_ = false;
@@ -37,7 +39,7 @@ public:
         run_ = true;
     }
 
-    inline auto processClientRequest (const MEClientRequest* request) noexcept -> void;
+    auto processClientRequest (const MEClientRequest* request) noexcept -> void;
 
     inline auto sendClientResponse(const MEClientResponse* response) noexcept {
         logger_->log("MEClientResponse [Client=% Ticker=% cOID=% mOID=% Status=% ExecQty=% ExecPx=% LeavesQty=%]\n", 
@@ -56,7 +58,7 @@ public:
     }
 
     inline auto sendMarketUpdate (const MEMarketUpdate* update) noexcept {
-        logger_->log("MEMarketUpdate [Ticker=% Side=% Px=% Qty=% UpdateType=%]\n", 
+        logger_->log("MEMarketUpdate   [Ticker=% Side=% Px=% Qty=% UpdateType=%]\n", 
             update->ticker_id_,
             static_cast<int>(update->side_),
             update->price_,

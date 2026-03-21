@@ -15,7 +15,7 @@ enum class Side { BUY, SELL };
 enum class OrderType { GoodTillCancel, FillAndKill };
 enum class ClientRequestType { NEW, CANCEL, MODIFY };
 enum class ResponseType { ACCEPTED, EXECUTED, CANCELED, CANCEL_REJECTED, MODIFIED };
-enum class UpdateType { ADD, CANCEL, MODIFY, TRADE };             
+enum class UpdateType { ADD, CANCEL, MODIFY, TRADE, SNAPSHOT_START, CLEAR, SNAPSHOT_END };             
 
 struct MEClientRequest {
     ClientRequestType action_; 
