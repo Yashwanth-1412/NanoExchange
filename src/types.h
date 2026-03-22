@@ -65,21 +65,22 @@ struct MEClientResponse {
 
 // QUEUE 3: Outbound Public (Engine -> Publisher -> ITCH Feed)
 struct MEMarketUpdate {
-    TickerId ticker_id_;
-    OrderId market_order_id_; // The public ITCH Reference Number
+    TickerId   ticker_id_;
+    OrderId    market_order_id_;
     UpdateType type_;
-    Side side_;
-    Price price_;
-    Quantity qty_;
+    Side       side_;
+    Price      price_;
+    Quantity   qty_;
+    OrderId    new_order_id_ = OrderId_INVALID;    // only used for MODIFY (OrderReplace)
 
-    // Default constructor
     MEMarketUpdate() = default;
 
-    // Parameterized constructor
-    MEMarketUpdate(TickerId ticker_id, OrderId market_order_id, UpdateType type, 
-                   Side side, Price price, Quantity qty)
-        : ticker_id_(ticker_id), market_order_id_(market_order_id), type_(type), 
-          side_(side), price_(price), qty_(qty) {}
+    MEMarketUpdate(TickerId ticker_id, OrderId market_order_id, UpdateType type,
+                   Side side, Price price, Quantity qty,
+                   OrderId new_order_id = OrderId_INVALID)
+        : ticker_id_(ticker_id), market_order_id_(market_order_id), type_(type),
+          side_(side), price_(price), qty_(qty), new_order_id_(new_order_id)
+    {}
 };
 
 
@@ -132,4 +133,16 @@ struct PriceLevel {
     PriceLevel (Price price) : price_(price)
     {}
     
+};
+
+
+struct SnapshotUpdate {
+    MEMarketUpdate update_;
+    uint64_t       seq_num_ = 0;
+
+    SnapshotUpdate() = default;
+
+    SnapshotUpdate(const MEMarketUpdate& update, uint64_t seq_num)
+        : update_(update), seq_num_(seq_num)
+    {}
 };
