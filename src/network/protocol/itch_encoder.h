@@ -12,11 +12,9 @@ using namespace quantlink::itch;
 constexpr size_t ITCH_MAX_MSG_SIZE = 40;
 
 inline void writeTimestamp(uint8_t* dst) noexcept {
-    uint64_t epoch_ns = quantlink::utils::get_current_epoch_nanos();
+    uint64_t ns_since_midnight = quantlink::utils::get_nanos_since_midnight();
 
-    constexpr uint64_t NS_PER_DAY = 86'400'000'000'000ULL;
-    uint64_t ns_since_midnight = epoch_ns % NS_PER_DAY;
-
+    // ITCH requires a 6-byte big-endian timestamp
     dst[0] = (ns_since_midnight >> 40) & 0xFF;
     dst[1] = (ns_since_midnight >> 32) & 0xFF;
     dst[2] = (ns_since_midnight >> 24) & 0xFF;
@@ -25,34 +23,15 @@ inline void writeTimestamp(uint8_t* dst) noexcept {
     dst[5] = (ns_since_midnight >> 0) & 0xFF;
 }
 
-
 inline uint16_t getStockLocate(TickerId ticker_id) noexcept {
-    // TODO: lookup from ticker table
-    return static_cast<uint16_t>(ticker_id);
+
+    // IM USING TICKER ID AS DIRECT OUCH STRING (64 bits cannot cast it to 16 bits)
+    return 0; 
 }
 
 inline void copyStock(char* dst, TickerId ticker_id) noexcept {
-
-    char buf[9] = "        ";
-    buf[0] = 'T';
-    buf[1] = 'K';
-    buf[2] = 'R';
-
-    uint32_t id = static_cast<uint32_t>(ticker_id);
-    int pos = 7;
-
-    if (id == 0) {
-        buf[3] = '0';
-    } else {
-        while (id > 0 && pos >= 3) {
-            buf[pos--] = '0' + (id % 10);
-            id /= 10;
-        }
-    }
-
-    std::memcpy(dst, buf, 8);
+    *reinterpret_cast<uint64_t*>(dst) = static_cast<uint64_t>(ticker_id);
 }
-
 
 inline size_t encode(const MEMarketUpdate& u, uint64_t match_number, void* buf) noexcept {
     switch (u.type_) {
@@ -67,7 +46,10 @@ inline size_t encode(const MEMarketUpdate& u, uint64_t match_number, void* buf) 
             msg.order_ref_num  = swap64(u.market_order_id_);
             msg.buy_sell = (u.side_ == Side::BUY) ? 'B' : 'S';
             msg.shares = swap32(static_cast<uint32_t>(u.qty_));
-            copyStock(msg.stock, u.ticker_id_);
+            
+            // This now executes in 1 instruction
+            copyStock(msg.stock, u.ticker_id_); 
+            
             msg.price = swap32(static_cast<uint32_t>(u.price_ * 100)); // $0.01 → ITCH 1/10000
 
             std::memcpy(buf, &msg, sizeof(msg));

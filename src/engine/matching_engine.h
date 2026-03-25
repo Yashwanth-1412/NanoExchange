@@ -42,11 +42,15 @@ MatchingEngine (SPSCQueue<MEClientRequest>* requests, SPSCQueue<MEClientResponse
     auto processClientRequest (const MEClientRequest* request) noexcept -> void;
 
     inline auto sendClientResponse(const MEClientResponse* response) noexcept {
-        logger_->log("MEClientResponse [Client=% Ticker=% cOID=% mOID=% Status=% ExecQty=% ExecPx=% LeavesQty=%]\n", 
+        logger_->log("MEClientResponse [Client=% Ticker=% cOID=% mOID=% Side=% Px=% Qty=% Type=% Status=% ExecQty=% ExecPx=% LeavesQty=%]\n", 
             response->client_id_,
             response->ticker_id_,
             response->client_order_id_,
             response->market_order_id_,
+            static_cast<int>(response->side_),
+            response->price_,
+            response->qty_,
+            static_cast<int>(response->type_),
             static_cast<int>(response->status_),
             response->executed_qty_,
             response->execution_price_,

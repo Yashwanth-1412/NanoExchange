@@ -43,3 +43,15 @@ target_include_directories(me_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
 )
 target_link_libraries(me_test PRIVATE Threads::Threads)
+
+
+add_executable(integration_test
+    tests/test_integration.cpp
+    src/engine/matching_engine.cpp
+    src/engine/order_book_map.cpp
+)
+target_include_directories(integration_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
+)
+target_link_libraries(integration_test PRIVATE Threads::Threads)

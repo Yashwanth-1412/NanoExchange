@@ -6,8 +6,10 @@
 #include "QuantLink/Lib/concurrency/lf_queue.h"
 #include "QuantLink/Lib/concurrency/thread_utils.h"
 #include "QuantLink/Lib/logging/logger.h"
+#include "QuantLink/Lib/network/mcast_socket.h"
 #include <atomic>
 #include <cstdint>
+#include <string>
 #include <thread>
 
 using namespace quantlink;
@@ -27,11 +29,11 @@ private:
     uint64_t next_seq_num_ = 1;   // Incremental ITCH sequence number
     uint64_t next_match_num_ = 1;   // Match number for OrderExecuted messages
 
-    // TODO: incremental UDP multicast socket
+    quantlink::McastSocket incremental_socket_;   // Incremental UDP multicast socket
 
-    inline void sendToIncrementalNetwork(const void* data, size_t size) {
-        // TODO: UDP Multicast sendto(...) on incremental stream
-        (void)data; (void)size;
+    inline void sendToIncrementalNetwork(const void* data, size_t len) noexcept {
+        incremental_socket_.send(&next_seq_num_, sizeof(next_seq_num_));   // seq_num prefix
+        incremental_socket_.send(data, len);                               // ITCH payload
     }
 
     auto run() noexcept -> void {
@@ -42,7 +44,11 @@ private:
         while (run_.load(std::memory_order_acquire)) {
 
             const auto* update = marketUpdates_->getNextRead();
-            if (!update) continue;
+            if (!update) {
+                // No updates — still flush any pending outbound data
+                incremental_socket_.sendAndRecv();
+                continue;
+            }
 
             logger_->log("MarketDataPublisher: seq=% Ticker=% Side=% Px=% Qty=% Type=%\n",
                 next_seq_num_,
@@ -62,6 +68,9 @@ private:
 
             marketUpdates_->updateNextRead();
             ++next_seq_num_;
+
+            // Flush encoded ITCH message to the wire
+            incremental_socket_.sendAndRecv();
         }
 
         logger_->log("MarketDataPublisher: thread exited safely.\n");
@@ -73,18 +82,28 @@ public:
     MarketDataPublisher(SPSCQueue<MEMarketUpdate>* marketUpdates,
                         quantlink::Logger* logger,
                         size_t maxTickers,
+                        const std::string& incremental_ip,
+                        const std::string& snapshot_ip,
+                        const std::string& iface,
+                        int incremental_port,
+                        int snapshot_port,
                         size_t snapshotQueueSize = 1024) :
         marketUpdates_(marketUpdates),
         snapshotUpdates_(snapshotQueueSize),
-        logger_(logger)
+        logger_(logger),
+        incremental_socket_(*logger)
     {
-        snapshotStreamer_ = new SnapshotStreamer(&snapshotUpdates_, logger_, maxTickers);
+        ASSERT(incremental_socket_.init(incremental_ip, iface, incremental_port, false) >= 0,
+               "MarketDataPublisher: failed to init incremental multicast socket");
+
+        snapshotStreamer_ = new SnapshotStreamer(&snapshotUpdates_, logger_, maxTickers,
+                                                 snapshot_ip, iface, snapshot_port);
     }
 
-    auto start() -> void {
+    auto start(int core_id = -1) -> void {
         run_.store(true, std::memory_order_release);
         snapshotStreamer_->start();
-        thread_ = quantlink::utils::create_and_pin_thread(-1, "MarketDataPublisher", [this]() { run(); });
+        thread_ = quantlink::utils::create_and_pin_thread(core_id, "MarketDataPublisher", [this]() { run(); });
     }
 
     auto stop() -> void {

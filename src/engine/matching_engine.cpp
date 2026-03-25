@@ -34,7 +34,9 @@ auto MatchingEngine::processClientRequest(const MEClientRequest* request) noexce
         }
 
         case ClientRequestType::MODIFY : {
-            // TODO: ADD modifyOrder function.
+            // orderbook->modifyOrder(request->ticker_id_, request->client_id_, 
+            //                        request->client_order_id_, request->new_client_order_id_, 
+            //                        request->type_, request->price_, request->qty_, request->side_);
             break;
         }
 

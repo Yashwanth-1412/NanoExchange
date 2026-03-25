@@ -1,20 +1,29 @@
 #pragma once
 
 #include "../../types.h"
+#include "../protocol/itch_encoder.h"
 #include "QuantLink/Lib/concurrency/lf_queue.h"
 #include "QuantLink/Lib/concurrency/thread_utils.h"
 #include "QuantLink/Lib/logging/logger.h"
 #include "QuantLink/Lib/logging/time_utils.h"
+#include "QuantLink/Lib/network/mcast_socket.h"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 
 using namespace quantlink;
+using namespace quantlink::itch;
 
-constexpr uint64_t SNAPSHOT_INTERVAL_NS = 60'000'000'000ULL;  
+constexpr uint64_t SNAPSHOT_INTERVAL_NS = 10'000'000'000ULL;
+
+
+constexpr uint16_t SNAP_CTRL_START = 0xBBBB;
+constexpr uint16_t SNAP_CTRL_CLEAR = 0xCCCC;
+constexpr uint16_t SNAP_CTRL_END   = 0xEEEE;
 
 class SnapshotStreamer {
 
@@ -28,15 +37,27 @@ private:
     std::vector<std::unordered_map<OrderId, MEMarketUpdate>> ticker_orders_;
     size_t   maxTickers_;
 
-    uint64_t last_seq_num_     = 0;    
-    uint64_t last_snapshot_ns_ = 0;    
+    uint64_t last_seq_num_ = 0;
+    uint64_t last_snapshot_ns_ = 0;
 
-    // TODO: snapshot UDP multicast socket
+    quantlink::McastSocket snapshot_socket_;
+
 
     inline void sendToSnapshotNetwork(const void* data, size_t size) {
-        // TODO: UDP Multicast sendto(...) on snapshot stream
-        (void)data; (void)size;
+        snapshot_socket_.send(data, size);
     }
+
+    // Sends a control OrderDelete with magic stock_locate and uint64 payload
+    inline void sendCtrl(uint16_t ctrl_code, uint64_t payload) noexcept {
+        OrderDelete msg{};
+        msg.type          = enums::MsgType::ORDER_DELETE;
+        msg.stock_locate  = swap16(ctrl_code);
+        msg.tracking_number = 0;
+        writeTimestamp(msg.timestamp);
+        msg.order_ref_num = swap64(payload);
+        sendToSnapshotNetwork(&msg, sizeof(msg));
+    }
+
 
     auto run() noexcept -> void {
         logger_->log("SnapshotStreamer: thread started.\n");
@@ -66,12 +87,16 @@ private:
 
 public:
 
-    SnapshotStreamer(SPSCQueue<SnapshotUpdate>* snapshotUpdates, quantlink::Logger* logger, size_t maxTickers) :
+    SnapshotStreamer(SPSCQueue<SnapshotUpdate>* snapshotUpdates, quantlink::Logger* logger, size_t maxTickers,
+                    const std::string& snapshot_ip, const std::string& iface, int snapshot_port) :
         snapshotUpdates_(snapshotUpdates),
         logger_(logger),
-        maxTickers_(maxTickers)
+        maxTickers_(maxTickers),
+        snapshot_socket_(*logger)
     {
         ticker_orders_.resize(maxTickers_);
+        ASSERT(snapshot_socket_.init(snapshot_ip, iface, snapshot_port, false) >= 0,
+               "SnapshotStreamer: failed to init snapshot multicast socket");
     }
 
     auto start(int core_id = -1) -> void {
@@ -97,19 +122,16 @@ public:
                 ticker_orders_[ticker][update->market_order_id_] = *update;
                 break;
             }
-            break;
-            
+
             case UpdateType::CANCEL : {
                 ticker_orders_[ticker].erase(update->market_order_id_);
                 break;
             }
-            break;
 
             case UpdateType::MODIFY : {
                 ticker_orders_[ticker][update->market_order_id_] = *update;
                 break;
             }
-            break;
 
             case UpdateType::TRADE : {
                 auto& order_map = ticker_orders_[ticker];
@@ -138,30 +160,31 @@ public:
     auto publishSnapshot() -> void {
         logger_->log("SnapshotStreamer: Publishing snapshot up to SeqNum: %\n", last_seq_num_);
 
-        MEMarketUpdate start_msg{};
-        start_msg.market_order_id_ = last_seq_num_;
-        start_msg.type_            = UpdateType::SNAPSHOT_START;
-        sendToSnapshotNetwork(&start_msg, sizeof(MEMarketUpdate));
+        alignas(8) char buf[ITCH_MAX_MSG_SIZE];
+
+        // SNAPSHOT_START — OrderDelete with stock_locate=0xBBBB, order_ref=last_seq_num
+        sendCtrl(SNAP_CTRL_START, last_seq_num_);
 
         for (size_t ticker_id = 0; ticker_id < maxTickers_; ticker_id++) {
             const auto& order_map = ticker_orders_[ticker_id];
 
-            MEMarketUpdate clear_msg{};
-            clear_msg.type_      = UpdateType::CLEAR;
-            clear_msg.ticker_id_ = ticker_id;
-            sendToSnapshotNetwork(&clear_msg, sizeof(MEMarketUpdate));
+            // CLEAR — OrderDelete with stock_locate=0xCCCC, order_ref=ticker_id
+            sendCtrl(SNAP_CTRL_CLEAR, static_cast<uint64_t>(ticker_id));
 
+            // ADD — encode each resting order as ITCH AddOrder
             for (const auto& [orderId, restingOrder] : order_map) {
-                MEMarketUpdate snapshot_msg = restingOrder;
-                snapshot_msg.type_          = UpdateType::ADD;
-                sendToSnapshotNetwork(&snapshot_msg, sizeof(MEMarketUpdate));
+                MEMarketUpdate add_msg = restingOrder;
+                add_msg.type_         = UpdateType::ADD;
+                size_t len = encode(add_msg, 0, buf);
+                if (len > 0) sendToSnapshotNetwork(buf, len);
             }
         }
 
-        MEMarketUpdate end_msg{};
-        end_msg.market_order_id_ = last_seq_num_;
-        end_msg.type_            = UpdateType::SNAPSHOT_END;
-        sendToSnapshotNetwork(&end_msg, sizeof(MEMarketUpdate));
+        // SNAPSHOT_END — OrderDelete with stock_locate=0xEEEE, order_ref=last_seq_num
+        sendCtrl(SNAP_CTRL_END, last_seq_num_);
+
+        // Flush all buffered snapshot messages to the wire in one shot
+        snapshot_socket_.sendAndRecv();
 
         logger_->log("SnapshotStreamer: Snapshot published.\n");
     }
