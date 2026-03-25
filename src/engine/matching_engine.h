@@ -1,48 +1,61 @@
 #pragma once
 
-#include "Lib/logging/logger.h"
-#include "../types.h"
+#include "QuantLink/Lib/logging/logger.h"
 #include "QuantLink/Lib/concurrency/lf_queue.h"
-#include <array>
-#include <cstddef>
+#include "QuantLink/Lib/concurrency/thread_utils.h"
+#include "../types.h"
+#include <vector>
+#include <atomic>
+#include <thread>
 
-constexpr size_t MAX_ORDER_BOOKS = 256;
-constexpr size_t MAX_LOGGER_SIZE = 8*1024*1024;
-constexpr size_t ORDER_BOOK_SIZE = 8*1024*1024;
+constexpr size_t MAX_ORDER_BOOKS  = 256;
+constexpr size_t MAX_LOGGER_SIZE  = 8 * 1024 * 1024;
+constexpr size_t ORDER_BOOK_SIZE  = 8 * 1024 * 1024;
 
 class MEOrderBook;
 
 using namespace quantlink;
+
 class MatchingEngine {
 
 private:
-    SPSCQueue<MEClientRequest>* requests_ = nullptr;
-    SPSCQueue<MEClientResponse>* responses_ = nullptr;
-    SPSCQueue<MEMarketUpdate>* marketUpdates_ = nullptr;
+    SPSCQueue<MEClientRequest>*  requests_      = nullptr;
+    SPSCQueue<MEClientResponse>* responses_     = nullptr;
+    SPSCQueue<MEMarketUpdate>*   marketUpdates_ = nullptr;
 
     std::vector<MEOrderBook*> ticker_order_book_;
     size_t maxOrderBooks_;
-    volatile bool run_ = false;
+
+    std::atomic<bool> run_{false};
+    std::thread       thread_;
 
     quantlink::Logger* logger_;
 
 public:
+    MatchingEngine(SPSCQueue<MEClientRequest>*  requests,
+                   SPSCQueue<MEClientResponse>* responses,
+                   SPSCQueue<MEMarketUpdate>*   marketupdates,
+                   quantlink::Logger*           logger,
+                   size_t maxOrderBooks    = MAX_ORDER_BOOKS,
+                   size_t orderBookPoolSize = ORDER_BOOK_SIZE);
 
-MatchingEngine (SPSCQueue<MEClientRequest>* requests, SPSCQueue<MEClientResponse>* responses, SPSCQueue<MEMarketUpdate>* marketupdates, quantlink::Logger* logger,
-                    size_t maxOrderBooks = MAX_ORDER_BOOKS, size_t orderBookPoolSize = ORDER_BOOK_SIZE);
-
-    auto stop () {
-        run_ = false;
+    // Launch run() on its own pinned thread — consistent with
+    // MarketDataPublisher, SnapshotStreamer, OrderServer
+    auto start(int coreId = -1) -> void {
+        run_.store(true, std::memory_order_release);
+        thread_ = quantlink::utils::create_and_pin_thread(
+            coreId, "MatchingEngine", [this]() { run(); });
     }
 
-    auto start () {
-        run_ = true;
+    auto stop() -> void {
+        run_.store(false, std::memory_order_release);
+        if (thread_.joinable()) thread_.join();
     }
 
-    auto processClientRequest (const MEClientRequest* request) noexcept -> void;
+    auto processClientRequest(const MEClientRequest* request) noexcept -> void;
 
     inline auto sendClientResponse(const MEClientResponse* response) noexcept {
-        logger_->log("MEClientResponse [Client=% Ticker=% cOID=% mOID=% Side=% Px=% Qty=% Type=% Status=% ExecQty=% ExecPx=% LeavesQty=%]\n", 
+        logger_->log("MEClientResponse [Client=% Ticker=% cOID=% mOID=% Side=% Px=% Qty=% Type=% Status=% ExecQty=% ExecPx=% LeavesQty=%]\n",
             response->client_id_,
             response->ticker_id_,
             response->client_order_id_,
@@ -56,27 +69,21 @@ MatchingEngine (SPSCQueue<MEClientRequest>* requests, SPSCQueue<MEClientResponse
             response->execution_price_,
             response->leaves_qty_
         );
-
         responses_->push(*response);
-
     }
 
-    inline auto sendMarketUpdate (const MEMarketUpdate* update) noexcept {
-        logger_->log("MEMarketUpdate   [Ticker=% Side=% Px=% Qty=% UpdateType=%]\n", 
+    inline auto sendMarketUpdate(const MEMarketUpdate* update) noexcept {
+        logger_->log("MEMarketUpdate   [Ticker=% Side=% Px=% Qty=% UpdateType=%]\n",
             update->ticker_id_,
             static_cast<int>(update->side_),
             update->price_,
             update->qty_,
             static_cast<int>(update->type_)
         );
-
         marketUpdates_->push(*update);
     }
 
     auto run() noexcept -> void;
 
     ~MatchingEngine();
-    
-
-
 };
