@@ -16,6 +16,14 @@ MEOrderBook::MEOrderBook(size_t size, TickerId tickerId, MatchingEngine* matchin
     }
 }
 
+inline auto sendClientResponse(MatchingEngine* me, const MEClientResponse* response) noexcept {
+    if (me) me->sendClientResponse(response);
+}
+
+inline auto sendMarketUpdate(MatchingEngine* me, const MEMarketUpdate* update) noexcept {
+    if (me) me->sendMarketUpdate(update);
+}
+
 
 auto MEOrderBook::insertPricelevel(PriceLevel* priceLevel, Side side) -> void {
     if (side == Side::BUY) {
@@ -88,10 +96,9 @@ auto MEOrderBook::insert(TickerId tickerId, ClientId clientId, OrderId clientOrd
 
     PriceLevel* priceLevel = (side == Side::BUY) ? &bids_[price] : &asks_[price];
 
-    // Allocate a new PriceLevel ONLY if it doesn't exist yet
-    if (UNLIKELY(priceLevel == nullptr)) {
-        //priceLevel = priceLevelPool_.allocate(price);
-        insertPricelevel(priceLevel, side); // Link it into the active market
+    // Link price level into active list if this is the first order at this price
+    if (priceLevel->head == nullptr) {
+        insertPricelevel(priceLevel, side);
     }
 
     if (priceLevel->head == nullptr) {                              // Adding the Order First
@@ -156,22 +163,25 @@ auto MEOrderBook::match(TickerId tickerId, ClientId clientId, OrderId clientOrde
 
                 MEClientResponse restingResponse{
                     restingOrder->clientId_, tickerId, restingOrder->clientOrderId_, restingOrder->marketOrderId_,
+                    restingOrder->side_, restingOrder->price_, restingOrder->initialQuantity_, restingOrder->orderType_,
                     ResponseType::EXECUTED,
                     fill, level->price_, restingOrder->remainingQuantity_
                 };
-                matchingEngine_->sendClientResponse(&restingResponse);     // SEND RESPONSE FOR RESTING ORDER
+                sendClientResponse(matchingEngine_, &restingResponse);
 
                 MEClientResponse aggressiveResponse{
-                    clientId, tickerId, clientOrderId, marketOrderId, ResponseType::EXECUTED,
+                    clientId, tickerId, clientOrderId, marketOrderId,
+                    side, price, initialQuantity, orderType,
+                    ResponseType::EXECUTED,
                     fill, level->price_, remainingQuantity
                 };
-                matchingEngine_->sendClientResponse(&aggressiveResponse);  // SEND RESPONSE FOR AGRESSIVE MATCHER
+                sendClientResponse(matchingEngine_, &aggressiveResponse);
 
                 MEMarketUpdate marketUpdate{
                     tickerId, restingOrder->marketOrderId_, UpdateType::TRADE,
                     restingOrder->side_, restingOrder->price_, fill
                 };
-                matchingEngine_->sendMarketUpdate(&marketUpdate);          // SEND MARKET UPDATE
+                sendMarketUpdate(matchingEngine_, &marketUpdate);
 
                 if (restingOrder->remainingQuantity_ == 0) remove(restingOrder);
             }
@@ -194,22 +204,25 @@ auto MEOrderBook::match(TickerId tickerId, ClientId clientId, OrderId clientOrde
 
                 MEClientResponse restingResponse{
                     restingOrder->clientId_, tickerId, restingOrder->clientOrderId_, restingOrder->marketOrderId_,
+                    restingOrder->side_, restingOrder->price_, restingOrder->initialQuantity_, restingOrder->orderType_,
                     ResponseType::EXECUTED,
                     fill, level->price_, restingOrder->remainingQuantity_
                 };
-                matchingEngine_->sendClientResponse(&restingResponse);     // SEND RESPONSE FOR RESTING ORDER
+                sendClientResponse(matchingEngine_, &restingResponse);
 
                 MEClientResponse aggressiveResponse{
-                    clientId, tickerId, clientOrderId, marketOrderId, ResponseType::EXECUTED,
+                    clientId, tickerId, clientOrderId, marketOrderId,
+                    side, price, initialQuantity, orderType,
+                    ResponseType::EXECUTED,
                     fill, level->price_, remainingQuantity
                 };
-                matchingEngine_->sendClientResponse(&aggressiveResponse);  // SEND RESPONSE FOR AGRESSIVE MATCHER
+                sendClientResponse(matchingEngine_, &aggressiveResponse);
 
                 MEMarketUpdate marketUpdate{
                     tickerId, restingOrder->marketOrderId_, UpdateType::TRADE,
                     restingOrder->side_, restingOrder->price_, fill
                 };
-                matchingEngine_->sendMarketUpdate(&marketUpdate);          // SEND MARKET UPDATE
+                sendMarketUpdate(matchingEngine_, &marketUpdate);
 
                 if (restingOrder->remainingQuantity_ == 0) remove(restingOrder);
             }
@@ -235,23 +248,27 @@ auto MEOrderBook::addOrder(TickerId tickerId, ClientId clientId, OrderId clientO
             insert(tickerId, clientId, clientOrderId, marketOrderId, orderType, price, remainingQuantity, side);
 
             MEClientResponse response{
-                clientId, tickerId, clientOrderId, marketOrderId, ResponseType::ACCEPTED,
+                clientId, tickerId, clientOrderId, marketOrderId,
+                side, price, initialQuantity, orderType,
+                ResponseType::ACCEPTED,
                 0, price, remainingQuantity
             };
-            matchingEngine_->sendClientResponse(&response);
+            sendClientResponse(matchingEngine_, &response);
 
             MEMarketUpdate marketUpdate{
                 tickerId, marketOrderId, UpdateType::ADD,
                 side, price, remainingQuantity
             };
-            matchingEngine_->sendMarketUpdate(&marketUpdate);
+            sendMarketUpdate(matchingEngine_, &marketUpdate);
         }
         else if (orderType == OrderType::FillAndKill) {
             MEClientResponse response{
-                clientId, tickerId, clientOrderId, marketOrderId, ResponseType::CANCELED,
+                clientId, tickerId, clientOrderId, marketOrderId,
+                side, price, initialQuantity, orderType,
+                ResponseType::CANCELED,
                 0, price, remainingQuantity
             };
-            matchingEngine_->sendClientResponse(&response);
+            sendClientResponse(matchingEngine_, &response);
         }
     }
 }
@@ -262,10 +279,12 @@ auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clie
     if (UNLIKELY(clientIt == orders_.end())) {
 
         MEClientResponse response{
-            clientId, tickerId, clientOrderId, OrderId_INVALID, ResponseType::CANCEL_REJECTED,
+            clientId, tickerId, clientOrderId, OrderId_INVALID,
+            Side::BUY, Price_INVALID, 0, OrderType::GoodTillCancel,
+            ResponseType::CANCEL_REJECTED,
             0, Price_INVALID, 0
         };
-        matchingEngine_->sendClientResponse(&response);
+        sendClientResponse(matchingEngine_, &response);
         return;
     }
 
@@ -273,10 +292,12 @@ auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clie
     if (UNLIKELY(clientOrderIt == clientIt->second.end())) {
 
         MEClientResponse response{
-            clientId, tickerId, clientOrderId, OrderId_INVALID, ResponseType::CANCEL_REJECTED,
+            clientId, tickerId, clientOrderId, OrderId_INVALID,
+            Side::BUY, Price_INVALID, 0, OrderType::GoodTillCancel,
+            ResponseType::CANCEL_REJECTED,
             0, Price_INVALID, 0
         };
-        matchingEngine_->sendClientResponse(&response);
+        sendClientResponse(matchingEngine_, &response);
         return;
     }
 
@@ -286,13 +307,15 @@ auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clie
         tickerId, order->marketOrderId_, UpdateType::CANCEL,
         order->side_, order->price_, order->remainingQuantity_
     };
-    matchingEngine_->sendMarketUpdate(&marketUpdate);
+    sendMarketUpdate(matchingEngine_, &marketUpdate);
 
     MEClientResponse response{
-        clientId, tickerId, clientOrderId, order->marketOrderId_, ResponseType::CANCELED,
+        clientId, tickerId, clientOrderId, order->marketOrderId_,
+        order->side_, order->price_, order->initialQuantity_, order->orderType_,
+        ResponseType::CANCELED,
         0, order->price_, 0
     };
-    matchingEngine_->sendClientResponse(&response);
+    sendClientResponse(matchingEngine_, &response);
 
     remove(order);
 }

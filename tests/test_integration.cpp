@@ -257,11 +257,6 @@ int main() {
                 0, 0
             };
             requestQ.push(req);
-            const auto* r = requestQ.getNextRead();
-            if (r) {
-                engine.processClientRequest(r);
-                requestQ.updateNextRead();
-            }
             stats.cancels_sent.fetch_add(1, std::memory_order_relaxed);
 
         } else {
@@ -276,11 +271,6 @@ int main() {
                 order.qty_
             };
             requestQ.push(req);
-            const auto* r = requestQ.getNextRead();
-            if (r) {
-                engine.processClientRequest(r);
-                requestQ.updateNextRead();
-            }
             stats.orders_sent.fetch_add(1, std::memory_order_relaxed);
         }
 

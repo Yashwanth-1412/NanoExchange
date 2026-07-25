@@ -11,15 +11,16 @@ MatchingEngine::MatchingEngine(SPSCQueue<MEClientRequest>* requests, SPSCQueue<M
             maxOrderBooks_(maxOrderBooks),
             logger_(logger) {
 
-    ticker_order_book_.resize(maxOrderBooks_);
+    ticker_order_book_.reserve(maxOrderBooks_);
     for (size_t i = 0; i < maxOrderBooks_; i++) {
-        ticker_order_book_[i] = new MEOrderBook(orderBookPoolSize, i, this);
+        ticker_order_book_.emplace_back(
+            std::make_unique<MEOrderBook>(orderBookPoolSize, i, this));
     }
 }
 
 
 auto MatchingEngine::processClientRequest(const MEClientRequest* request) noexcept -> void {
-    auto orderbook = ticker_order_book_[request->ticker_id_];
+    auto* orderbook = ticker_order_book_[request->ticker_id_].get();
 
     switch (request->action_) {
         case ClientRequestType::NEW: {
@@ -73,13 +74,5 @@ auto MatchingEngine::run() noexcept -> void {
 
 MatchingEngine::~MatchingEngine() {
     stop();   // joins thread, sets run_ = false
-
-    requests_     = nullptr;
-    responses_    = nullptr;
-    marketUpdates_= nullptr;
-
-    for (auto orderbook : ticker_order_book_) {
-        delete orderbook;
-        orderbook = nullptr;
-    }
+    // ticker_order_book_ auto-deleted via unique_ptr
 }

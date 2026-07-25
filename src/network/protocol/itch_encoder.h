@@ -50,7 +50,9 @@ inline size_t encode(const MEMarketUpdate& u, uint64_t match_number, void* buf) 
             // This now executes in 1 instruction
             copyStock(msg.stock, u.ticker_id_); 
             
-            msg.price = swap32(static_cast<uint32_t>(u.price_ * 100)); // $0.01 → ITCH 1/10000
+            // TODO: Remove * 100 when ouch_processor stores raw 1/10000 value.
+            // Should be: msg.price = swap32(static_cast<uint32_t>(u.price_));
+            msg.price = swap32(static_cast<uint32_t>(u.price_ * 100));
 
             std::memcpy(buf, &msg, sizeof(msg));
             return sizeof(msg);

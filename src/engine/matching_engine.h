@@ -7,6 +7,7 @@
 #include <vector>
 #include <atomic>
 #include <thread>
+#include <memory>
 
 constexpr size_t MAX_ORDER_BOOKS  = 256;
 constexpr size_t MAX_LOGGER_SIZE  = 8 * 1024 * 1024;
@@ -23,7 +24,7 @@ private:
     SPSCQueue<MEClientResponse>* responses_     = nullptr;
     SPSCQueue<MEMarketUpdate>*   marketUpdates_ = nullptr;
 
-    std::vector<MEOrderBook*> ticker_order_book_;
+    std::vector<std::unique_ptr<MEOrderBook>> ticker_order_book_;
     size_t maxOrderBooks_;
 
     std::atomic<bool> run_{false};

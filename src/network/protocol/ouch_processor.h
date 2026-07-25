@@ -27,6 +27,8 @@ inline bool decodeOuch (const char* data, ClientId clientId, OrderTokenManager& 
             out_request.ticker_id_ = *reinterpret_cast<const uint64_t*>(msg->stock);
             out_request.client_order_id_ = token_manager.registerNewToken(msg->order_token, out_request.ticker_id_);
             out_request.side_ = (msg->buy_sell_indicator == 'B')? Side::BUY : Side::SELL;
+            // TODO: Fix price scaling — get_price() returns dollars (double), truncating 1/10000 precision.
+            // Should be: out_request.price_ = swap32(msg->price);  // keep ITCH/OUCH 1/10000 scale
             out_request.price_ = msg->get_price();
             out_request.qty_ = msg->get_shares();
             
@@ -50,6 +52,8 @@ inline bool decodeOuch (const char* data, ClientId clientId, OrderTokenManager& 
 
             out_request.action_= ClientRequestType::MODIFY;
             out_request.qty_ = msg->get_shares();
+            // TODO: Fix price scaling — same issue as EnterOrder above.
+            // Should be: out_request.price_ = swap32(msg->price);
             out_request.price_ = msg->get_price();
             out_request.type_ = (ouch::swap32(msg->time_in_force) == 0) ? OrderType::FillAndKill : OrderType::GoodTillCancel;
 
