@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <thread>
+#include <memory>
 
 using namespace quantlink;
 
@@ -21,7 +22,7 @@ private:
     SPSCQueue<SnapshotUpdate> snapshotUpdates_;             // TO snapshot streamer
 
     quantlink::Logger* logger_;
-    SnapshotStreamer* snapshotStreamer_ = nullptr;
+    std::unique_ptr<SnapshotStreamer> snapshotStreamer_;
 
     std::atomic<bool> run_{false};
     std::thread thread_;
@@ -80,14 +81,13 @@ private:
 public:
 
     MarketDataPublisher(SPSCQueue<MEMarketUpdate>* marketUpdates,
-                        quantlink::Logger* logger,
-                        size_t maxTickers,
-                        const std::string& incremental_ip,
-                        const std::string& snapshot_ip,
-                        const std::string& iface,
-                        int incremental_port,
-                        int snapshot_port,
-                        size_t snapshotQueueSize = 1024) :
+                         quantlink::Logger* logger,
+                         size_t maxTickers,
+                         const std::string& incremental_ip,
+                         const std::string& iface,
+                         int incremental_port,
+                         int snapshot_tcp_port,
+                         size_t snapshotQueueSize = 1024) :
         marketUpdates_(marketUpdates),
         snapshotUpdates_(snapshotQueueSize),
         logger_(logger),
@@ -96,8 +96,8 @@ public:
         ASSERT(incremental_socket_.init(incremental_ip, iface, incremental_port, false) >= 0,
                "MarketDataPublisher: failed to init incremental multicast socket");
 
-        snapshotStreamer_ = new SnapshotStreamer(&snapshotUpdates_, logger_, maxTickers,
-                                                 snapshot_ip, iface, snapshot_port);
+        snapshotStreamer_ = std::make_unique<SnapshotStreamer>(&snapshotUpdates_, logger_, maxTickers,
+                                                               snapshot_tcp_port);
     }
 
     auto start(int core_id = -1) -> void {
@@ -114,8 +114,7 @@ public:
 
     ~MarketDataPublisher() {
         stop();
-        delete snapshotStreamer_;
-        snapshotStreamer_ = nullptr;
+        // snapshotStreamer_ auto-deleted via unique_ptr
     }
 
 };

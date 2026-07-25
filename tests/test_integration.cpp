@@ -192,7 +192,7 @@ int main() {
     MarketDataPublisher publisher(
         &marketUpdateQ, &logger,
         NUM_TICKERS,
-        INCREMENTAL_IP, SNAPSHOT_IP, IFACE,
+        INCREMENTAL_IP, IFACE,
         INCREMENTAL_PORT, SNAPSHOT_PORT
     );
 

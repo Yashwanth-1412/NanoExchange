@@ -30,14 +30,14 @@ static void printUsage(const char* prog) {
         << "\nUsage: " << prog
         << " <gateway_iface> <gateway_port>"
         << " <incremental_ip> <incremental_port>"
-        << " <snapshot_ip> <snapshot_port>"
+        << " <snapshot_tcp_port>"
         << " <mcast_iface>"
         << " [core_me] [core_gateway] [core_publisher]\n"
         << "\nExample:\n"
         << "  " << prog
         << " lo 10000"
         << " 224.0.0.1 20001"
-        << " 224.0.0.2 20002"
+        << " 20002"
         << " lo 1 2 3\n"
         << "\nNotes:\n"
         << "  core_* = CPU core to pin each thread to (-1 = OS decides)\n"
@@ -58,7 +58,7 @@ constexpr size_t SNAPSHOT_Q_SIZE   = 1024;
 
 int main(int argc, char* argv[]) {
 
-    if (argc < 8) {
+    if (argc < 7) {
         printUsage(argv[0]);
         return 1;
     }
@@ -67,13 +67,12 @@ int main(int argc, char* argv[]) {
     const int         gatewayPort     = std::atoi(argv[2]);
     const std::string incrementalIp   = argv[3];
     const int         incrementalPort = std::atoi(argv[4]);
-    const std::string snapshotIp      = argv[5];
-    const int         snapshotPort    = std::atoi(argv[6]);
-    const std::string mcastIface      = argv[7];
+    const int         snapshotTcpPort = std::atoi(argv[5]);
+    const std::string mcastIface      = argv[6];
 
-    const int coreMe        = (argc > 8)  ? std::atoi(argv[8])  : 1;
-    const int coreGateway   = (argc > 9)  ? std::atoi(argv[9])  : 2;
-    const int corePublisher = (argc > 10) ? std::atoi(argv[10]) : 3;
+    const int coreMe        = (argc > 7) ? std::atoi(argv[7]) : 1;
+    const int coreGateway   = (argc > 8) ? std::atoi(argv[8]) : 2;
+    const int corePublisher = (argc > 9) ? std::atoi(argv[9]) : 3;
 
     std::signal(SIGINT,  sigHandler);
     std::signal(SIGTERM, sigHandler);
@@ -86,7 +85,7 @@ int main(int argc, char* argv[]) {
         << "  Tickers          : " << NUM_TICKERS        << "\n"
         << "  Gateway          : " << gatewayIface << ":" << gatewayPort      << "\n"
         << "  Incremental feed : " << incrementalIp << ":" << incrementalPort << "\n"
-        << "  Snapshot feed    : " << snapshotIp   << ":" << snapshotPort     << "\n"
+        << "  Snapshot TCP     : " << snapshotTcpPort                       << "\n"
         << "  Mcast iface      : " << mcastIface                              << "\n"
         << "  Core ME          : " << coreMe                                  << "\n"
         << "  Core Gateway     : " << coreGateway                             << "\n"
@@ -117,8 +116,8 @@ int main(int argc, char* argv[]) {
     MarketDataPublisher publisher(
         &marketUpdateQ, &logger,
         NUM_TICKERS,
-        incrementalIp, snapshotIp, mcastIface,
-        incrementalPort, snapshotPort,
+        incrementalIp, mcastIface,
+        incrementalPort, snapshotTcpPort,
         SNAPSHOT_Q_SIZE
     );
 
