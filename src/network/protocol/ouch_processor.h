@@ -24,12 +24,15 @@ inline bool decodeOuch (const char* data, ClientId clientId, OrderTokenManager& 
             const auto* msg  = reinterpret_cast<const ouch::EnterOrder*> (data);
             out_request.action_ = ClientRequestType::NEW;
             out_request.type_ = (ouch::swap32(msg->time_in_force) == 0) ? OrderType::FillAndKill : OrderType::GoodTillCancel;
-            out_request.ticker_id_ = *reinterpret_cast<const uint64_t*>(msg->stock);
-            out_request.client_order_id_ = token_manager.registerNewToken(msg->order_token, out_request.ticker_id_);
+            out_request.ticker_id_ = ouch::swap64(*reinterpret_cast<const uint64_t*>(msg->stock));
+            out_request.client_order_id_ = token_manager.registerNewToken(clientId, msg->order_token, out_request.ticker_id_);
+            // A failed registration means no token can ever be resolved for this
+            // order, so every response we later build for it would be unsendable.
+            // Reject at the door instead of admitting an unaddressable order.
+            if (!out_request.client_order_id_) return false;
+            std::memcpy(out_request.order_token_.data(), msg->order_token, OUCH_TOKEN_LEN);
             out_request.side_ = (msg->buy_sell_indicator == 'B')? Side::BUY : Side::SELL;
-            // TODO: Fix price scaling — get_price() returns dollars (double), truncating 1/10000 precision.
-            // Should be: out_request.price_ = swap32(msg->price);  // keep ITCH/OUCH 1/10000 scale
-            out_request.price_ = msg->get_price();
+            out_request.price_ = ouch::swap32(msg->price);
             out_request.qty_ = msg->get_shares();
             
 
@@ -40,10 +43,12 @@ inline bool decodeOuch (const char* data, ClientId clientId, OrderTokenManager& 
             const auto* msg = reinterpret_cast<const ouch::CancelOrder*>(data);
 
             out_request.action_ = ClientRequestType::CANCEL;
-            out_request.client_order_id_ = token_manager.getID(msg->order_token);
+            out_request.client_order_id_ = token_manager.getID(clientId, msg->order_token);
+            if (!out_request.client_order_id_) return false;
+            std::memcpy(out_request.order_token_.data(), msg->order_token, OUCH_TOKEN_LEN);
             out_request.qty_ = msg->get_shares();
             out_request.ticker_id_ = token_manager.id_to_token_[out_request.client_order_id_].tickerId_;
-            return out_request.client_order_id_ != 0;
+            return true;
         }
 
         case static_cast<char>(ouch::enums::MsgType::REPLACE_ORDER
@@ -52,18 +57,18 @@ inline bool decodeOuch (const char* data, ClientId clientId, OrderTokenManager& 
 
             out_request.action_= ClientRequestType::MODIFY;
             out_request.qty_ = msg->get_shares();
-            // TODO: Fix price scaling — same issue as EnterOrder above.
-            // Should be: out_request.price_ = swap32(msg->price);
-            out_request.price_ = msg->get_price();
+            out_request.price_ = ouch::swap32(msg->price);
             out_request.type_ = (ouch::swap32(msg->time_in_force) == 0) ? OrderType::FillAndKill : OrderType::GoodTillCancel;
 
-            out_request.client_order_id_ = token_manager.getID(msg->existing_order_token);
+            out_request.client_order_id_ = token_manager.getID(clientId, msg->existing_order_token);
+            if (!out_request.client_order_id_) return false;
             out_request.ticker_id_ = token_manager.id_to_token_[out_request.client_order_id_].tickerId_;
 
-            if (!out_request.client_order_id_) return false;
-
-            out_request.new_client_order_id_ = token_manager.registerNewToken(msg->replacement_order_token, out_request.ticker_id_);
-
+            out_request.new_client_order_id_ = token_manager.registerNewToken(clientId, msg->replacement_order_token, out_request.ticker_id_);
+            if (!out_request.new_client_order_id_) return false;
+            // Responses for a replace echo the REPLACEMENT token, and the order
+            // that survives the replace is the replacement one.
+            std::memcpy(out_request.order_token_.data(), msg->replacement_order_token, OUCH_TOKEN_LEN);
             return true;
         }
 
@@ -72,9 +77,10 @@ inline bool decodeOuch (const char* data, ClientId clientId, OrderTokenManager& 
 } 
 
 
-inline size_t encodeOuch(char* out_buffer, const MEClientResponse& resp, OrderTokenManager& token_manager, uint64_t current_ts) {
-    const char* token = token_manager.getToken(resp.client_order_id_);
-    if (!token) return 0; 
+// Pure function of the response: the token travels on MEClientResponse, so this
+// cannot fail a lookup and silently drop a fill.
+inline size_t encodeOuch(char* out_buffer, const MEClientResponse& resp, uint64_t current_ts) {
+    const char* token = resp.order_token_.data();
 
     switch (resp.status_) {
         case ResponseType::ACCEPTED: {
@@ -87,7 +93,7 @@ inline size_t encodeOuch(char* out_buffer, const MEClientResponse& resp, OrderTo
             
             msg->buy_sell_indicator = (resp.side_ == Side::BUY) ? 'B' : 'S';
             msg->shares = ouch::swap32(resp.qty_);
-            *reinterpret_cast<uint64_t*>(msg->stock) = resp.ticker_id_;
+            *reinterpret_cast<uint64_t*>(msg->stock) = ouch::swap64(resp.ticker_id_);
             msg->price = ouch::swap32(resp.price_);
             msg->time_in_force = ouch::swap32((resp.type_ == OrderType::FillAndKill) ? 0 : 99998);
             msg->order_reference_number = ouch::swap64(resp.market_order_id_);
@@ -105,7 +111,7 @@ inline size_t encodeOuch(char* out_buffer, const MEClientResponse& resp, OrderTo
 
             msg->executed_shares = ouch::swap32(resp.executed_qty_);
             msg->execution_price = ouch::swap32(resp.execution_price_);
-            msg->match_number = ouch::swap64(resp.market_order_id_); 
+            msg->match_number = ouch::swap64(resp.match_id_);
 
             return sizeof(ouch::OrderExecuted);
         }
@@ -134,7 +140,7 @@ inline size_t encodeOuch(char* out_buffer, const MEClientResponse& resp, OrderTo
 
             msg->buy_sell_indicator = (resp.side_ == Side::BUY) ? 'B' : 'S';
             msg->shares = ouch::swap32(resp.qty_);
-            *reinterpret_cast<uint64_t*>(msg->stock) = resp.ticker_id_;
+            *reinterpret_cast<uint64_t*>(msg->stock) = ouch::swap64(resp.ticker_id_);
             msg->price = ouch::swap32(resp.price_);
             msg->time_in_force = ouch::swap32((resp.type_ == OrderType::FillAndKill) ? 0 : 99998);
             msg->order_reference_number = ouch::swap64(resp.market_order_id_);
@@ -157,4 +163,3 @@ inline size_t encodeOuch(char* out_buffer, const MEClientResponse& resp, OrderTo
             return 0;
     }
 }
-

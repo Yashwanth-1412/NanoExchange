@@ -32,6 +32,7 @@ target_include_directories(NanoExchange PRIVATE
 )
 
 target_link_libraries(NanoExchange PRIVATE Threads::Threads)
+target_link_options(NanoExchange PRIVATE -rdynamic)
 
 # ── Order Book Unit Test ───────────────────────────────────────────────────────
 
@@ -89,6 +90,28 @@ target_include_directories(integration_test PRIVATE
 )
 
 target_link_libraries(integration_test PRIVATE Threads::Threads)
+
+add_executable(test_protocol_price
+    tests/test_protocol_price.cpp
+)
+
+target_include_directories(test_protocol_price PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
+)
+
+target_link_libraries(test_protocol_price PRIVATE Threads::Threads)
+
+add_executable(test_queue_backpressure
+    tests/test_queue_backpressure.cpp
+)
+
+target_include_directories(test_queue_backpressure PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
+)
+
+target_link_libraries(test_queue_backpressure PRIVATE Threads::Threads)
 
 # ── Print all targets for convenience ─────────────────────────────────────────
 

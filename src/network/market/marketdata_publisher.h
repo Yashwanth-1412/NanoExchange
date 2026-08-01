@@ -3,12 +3,14 @@
 #include "../../types.h"
 #include "snapshot_stream.h"
 #include "../protocol/itch_encoder.h"
+#include "QuantLink/Lib/protocol/itch_messages.h"
 #include "QuantLink/Lib/concurrency/lf_queue.h"
 #include "QuantLink/Lib/concurrency/thread_utils.h"
 #include "QuantLink/Lib/logging/logger.h"
-#include "QuantLink/Lib/network/mcast_socket.h"
+#include "QuantLink/Lib/network/udp_fanout_socket.h"
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <memory>
@@ -19,59 +21,50 @@ class MarketDataPublisher {
 
 private:
     SPSCQueue<MEMarketUpdate>* marketUpdates_ = nullptr;   // FROM matching engine
-    SPSCQueue<SnapshotUpdate> snapshotUpdates_;             // TO snapshot streamer
+    SPSCQueue<SnapshotUpdate> streamer_updates_;             // TO snapshot streamer
 
     quantlink::Logger* logger_;
     std::unique_ptr<SnapshotStreamer> snapshotStreamer_;
 
     std::atomic<bool> run_{false};
     std::thread thread_;
+    int streamer_core_ = -1;
 
     uint64_t next_seq_num_ = 1;   // Incremental ITCH sequence number
-    uint64_t next_match_num_ = 1;   // Match number for OrderExecuted messages
 
-    quantlink::McastSocket incremental_socket_;   // Incremental UDP multicast socket
+    // Feed gateway: clients register with a NEXSUB datagram on the incremental
+    // port; every frame is unicast to each registered subscriber (emulates the
+    // multicast group without kernel multicast routing).
+    quantlink::UdpFanoutSocket incremental_socket_;
 
     inline void sendToIncrementalNetwork(const void* data, size_t len) noexcept {
-        incremental_socket_.send(&next_seq_num_, sizeof(next_seq_num_));   // seq_num prefix
-        incremental_socket_.send(data, len);                               // ITCH payload
+        // seq_num prefix + ITCH payload as separate iovecs -> kernel assembles
+        // the datagram; no intermediate combined buffer, no memcpy.
+        const uint64_t seq_be = itch::swap64(next_seq_num_);
+        incremental_socket_.fanout(&seq_be, sizeof(seq_be), data, len);
     }
 
     auto run() noexcept -> void {
         logger_->log("MarketDataPublisher: thread started.\n");
 
-        alignas(8) char buf[ITCH_MAX_MSG_SIZE];
-
         while (run_.load(std::memory_order_acquire)) {
+            incremental_socket_.pollRegistrations();
+            incremental_socket_.sweepStale();
 
             const auto* update = marketUpdates_->getNextRead();
-            if (!update) {
-                // No updates — still flush any pending outbound data
-                incremental_socket_.sendAndRecv();
+            if (!update)
                 continue;
+
+            // Encode ONCE per update; the same bytes go to UDP and to queue 2
+            SnapshotUpdate snap(*update, next_seq_num_);
+            snap.len_ = encode(*update, snap.bytes_);
+            if (snap.len_ > 0) {
+                sendToIncrementalNetwork(snap.bytes_, snap.len_);
+                streamer_updates_.pushBlocking(snap);
             }
-
-            logger_->log("MarketDataPublisher: seq=% Ticker=% Side=% Px=% Qty=% Type=%\n",
-                next_seq_num_,
-                update->ticker_id_,
-                static_cast<int>(update->side_),
-                update->price_,
-                update->qty_,
-                static_cast<int>(update->type_)
-            );
-
-            size_t len = encode(*update, next_match_num_, buf);
-            if (len > 0) sendToIncrementalNetwork(buf, len);
-
-            if (update->type_ == UpdateType::TRADE) next_match_num_++;
-
-            snapshotUpdates_.push(SnapshotUpdate{*update, next_seq_num_});
 
             marketUpdates_->updateNextRead();
             ++next_seq_num_;
-
-            // Flush encoded ITCH message to the wire
-            incremental_socket_.sendAndRecv();
         }
 
         logger_->log("MarketDataPublisher: thread exited safely.\n");
@@ -87,22 +80,27 @@ public:
                          const std::string& iface,
                          int incremental_port,
                          int snapshot_tcp_port,
-                         size_t snapshotQueueSize = 1024) :
+                         size_t snapshotQueueSize = 1024,
+                         int streamer_core = -1) :
         marketUpdates_(marketUpdates),
-        snapshotUpdates_(snapshotQueueSize),
+        streamer_updates_(snapshotQueueSize),
         logger_(logger),
-        incremental_socket_(*logger)
+        incremental_socket_(*logger),
+        streamer_core_(streamer_core)
     {
-        ASSERT(incremental_socket_.init(incremental_ip, iface, incremental_port, false) >= 0,
-               "MarketDataPublisher: failed to init incremental multicast socket");
+        ASSERT(incremental_socket_.init(incremental_port, iface) >= 0,
+               "MarketDataPublisher: failed to init incremental feed gateway socket");
+        logger_->log("MarketDataPublisher: incremental feed gateway on :%d "
+                     "(register via NEXSUB, per-subscriber unicast fan-out)\n",
+                     incremental_port);
 
-        snapshotStreamer_ = std::make_unique<SnapshotStreamer>(&snapshotUpdates_, logger_, maxTickers,
+        snapshotStreamer_ = std::make_unique<SnapshotStreamer>(&streamer_updates_, logger_, maxTickers,
                                                                snapshot_tcp_port);
     }
 
     auto start(int core_id = -1) -> void {
         run_.store(true, std::memory_order_release);
-        snapshotStreamer_->start();
+        snapshotStreamer_->start(streamer_core_);
         thread_ = quantlink::utils::create_and_pin_thread(core_id, "MarketDataPublisher", [this]() { run(); });
     }
 

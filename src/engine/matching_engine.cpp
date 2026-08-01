@@ -25,15 +25,19 @@ auto MatchingEngine::processClientRequest(const MEClientRequest* request) noexce
     switch (request->action_) {
         case ClientRequestType::NEW: {
             orderbook->addOrder(request->ticker_id_, request->client_id_,
-                request->client_order_id_, request->type_, request->price_, request->qty_, request->side_);
+                request->client_order_id_, request->type_, request->price_, request->qty_, request->side_,
+                request->order_token_);
             break;
         }
         case ClientRequestType::CANCEL: {
-            orderbook->cancelOrder(request->ticker_id_, request->client_id_, request->client_order_id_);
+            orderbook->cancelOrder(request->ticker_id_, request->client_id_, request->client_order_id_, request->qty_,
+                                   request->order_token_);
             break;
         }
         case ClientRequestType::MODIFY: {
-            // TODO: implement modifyOrder
+            orderbook->replaceOrder(request->ticker_id_, request->client_id_, request->client_order_id_,
+                                    request->new_client_order_id_, request->type_, request->price_, request->qty_,
+                                    request->order_token_);
             break;
         }
         default: {

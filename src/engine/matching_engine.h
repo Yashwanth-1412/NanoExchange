@@ -26,6 +26,7 @@ private:
 
     std::vector<std::unique_ptr<MEOrderBook>> ticker_order_book_;
     size_t maxOrderBooks_;
+    OrderId next_match_id_ = 1;
 
     std::atomic<bool> run_{false};
     std::thread       thread_;
@@ -54,6 +55,7 @@ public:
     }
 
     auto processClientRequest(const MEClientRequest* request) noexcept -> void;
+    OrderId nextMatchId() noexcept { return next_match_id_++; }
 
     inline auto sendClientResponse(const MEClientResponse* response) noexcept {
         logger_->log("MEClientResponse [Client=% Ticker=% cOID=% mOID=% Side=% Px=% Qty=% Type=% Status=% ExecQty=% ExecPx=% LeavesQty=%]\n",
@@ -70,18 +72,19 @@ public:
             response->execution_price_,
             response->leaves_qty_
         );
-        responses_->push(*response);
+        responses_->pushBlocking(*response);
     }
 
     inline auto sendMarketUpdate(const MEMarketUpdate* update) noexcept {
-        logger_->log("MEMarketUpdate   [Ticker=% Side=% Px=% Qty=% UpdateType=%]\n",
+        logger_->log("MEMarketUpdate   [Ticker=% Match=% Side=% Px=% Qty=% UpdateType=%]\n",
             update->ticker_id_,
+            update->match_id_,
             static_cast<int>(update->side_),
             update->price_,
             update->qty_,
             static_cast<int>(update->type_)
         );
-        marketUpdates_->push(*update);
+        marketUpdates_->pushBlocking(*update);
     }
 
     auto run() noexcept -> void;

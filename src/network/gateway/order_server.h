@@ -108,7 +108,14 @@ private:
             bool ok = decodeOuch(data + offset, cid, tokenManager_, req);
 
             if (LIKELY(ok)) {
-                fifo_.addToPending(kernel_time, req);
+                if (UNLIKELY(!fifo_.addToPending(kernel_time, req))) {
+                    fifo_.publishPendingOrders();
+                    if (UNLIKELY(!fifo_.addToPending(kernel_time, req))) {
+                        fifo_.growPending();
+                        const bool added = fifo_.addToPending(kernel_time, req);
+                        ASSERT(added, "OrderServer: failed to retain decoded request");
+                    }
+                }
             } else {
                 logger_->log("OrderServer: decodeOuch failed msgType=% clientId=%\n",
                              static_cast<int>(msgType), cid);
@@ -155,17 +162,23 @@ private:
 
             auto it = clientToSocket_.find(resp->client_id_);
             if (UNLIKELY(it == clientToSocket_.end())) {
-                // Client disconnected — drop silently
+                logger_->log("OrderServer: no socket for clientId=% cOID=% status=% — response dropped\n",
+                             resp->client_id_, resp->client_order_id_,
+                             static_cast<int>(resp->status_));
                 responseQ_->updateNextRead();
                 continue;
             }
 
             char   buf[256];
             Nanos  now = quantlink::utils::get_current_epoch_nanos();
-            size_t len = encodeOuch(buf, *resp, tokenManager_, now);
+            size_t len = encodeOuch(buf, *resp, now);
 
             if (LIKELY(len > 0))
                 it->second->send(buf, len);   // staged; flushed by sendAndRecv()
+            else
+                logger_->log("OrderServer: encodeOuch produced 0 bytes clientId=% cOID=% status=% — response dropped\n",
+                             resp->client_id_, resp->client_order_id_,
+                             static_cast<int>(resp->status_));
 
             responseQ_->updateNextRead();
         }
@@ -200,6 +213,16 @@ private:
                      socket->socket_fd_, cid);
     }
 
+    auto onDisconnect(TCPSocket* socket) -> void {
+        const auto fd_it = fdToClientId_.find(socket->socket_fd_);
+        if (fd_it == fdToClientId_.end()) return;
+
+        const ClientId client_id = fd_it->second;
+        clientToSocket_.erase(client_id);
+        fdToClientId_.erase(fd_it);
+        logger_->log("OrderServer: disconnected clientId=% fd=%\n", client_id, socket->socket_fd_);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     //  Main run loop
     // ─────────────────────────────────────────────────────────────────────────
@@ -210,6 +233,10 @@ private:
 
             // Stage engine responses into socket send buffers
             drainResponses();
+
+            // Retain requests when the engine queue is full and retry after
+            // draining responses, avoiding a gateway/engine backpressure cycle.
+            fifo_.publishPendingOrders();
 
             // Accept new connections, queue readable/writable sockets
             server_.poll();
@@ -251,6 +278,11 @@ public:
         // This is the FIFO sequencer's publish trigger
         server_.recv_finished_callback_ = [this]() {
             onRecvFinished();
+        };
+
+        // Runs on the gateway thread before TCPServer destroys the socket.
+        server_.disconnect_callback_ = [this](TCPSocket* socket) {
+            onDisconnect(socket);
         };
 
         server_.listen(iface, port);

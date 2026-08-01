@@ -70,9 +70,27 @@ void sendNew(ClientId clientId, OrderId clientOrderId, TickerId tickerId,
     send(ClientRequestType::NEW, clientId, clientOrderId, tickerId, type, side, price, qty);
 }
 
-void sendCancel(ClientId clientId, OrderId clientOrderId, TickerId tickerId) {
+void sendCancel(ClientId clientId, OrderId clientOrderId, TickerId tickerId, Quantity qty = 0) {
     send(ClientRequestType::CANCEL, clientId, clientOrderId, tickerId,
-         OrderType::GoodTillCancel, Side::BUY, 0, 0);
+         OrderType::GoodTillCancel, Side::BUY, 0, qty);
+}
+
+void sendReplace(ClientId clientId, OrderId clientOrderId, OrderId newClientOrderId,
+                 TickerId tickerId, OrderType type, Side side, Price price, Quantity qty) {
+    MEClientRequest request{};
+    request.action_ = ClientRequestType::MODIFY;
+    request.client_id_ = clientId;
+    request.ticker_id_ = tickerId;
+    request.client_order_id_ = clientOrderId;
+    request.new_client_order_id_ = newClientOrderId;
+    request.type_ = type;
+    request.side_ = side;
+    request.price_ = price;
+    request.qty_ = qty;
+    requestQ.push(request);
+    const auto* queued = requestQ.getNextRead();
+    engine->processClientRequest(queued);
+    requestQ.updateNextRead();
 }
 
 // Drain all pending responses
@@ -142,22 +160,28 @@ void test_full_fill() {
     auto resps   = drainResponses();
     auto updates = drainMarketUpdates();
 
-    // Queues: resting EXECUTED + aggressive EXECUTED
-    CHECK(resps.size()   == 2,                          "responseQ has 2 messages");
+    // Queues: aggressive ACCEPTED + resting EXECUTED + aggressive EXECUTED
+    CHECK(resps.size()   == 3,                          "responseQ has 3 messages");
     CHECK(updates.size() == 1,                          "marketUpdateQ has 1 message (TRADE)");
 
+    CHECK(resps[0].client_id_       == 2,               "aggressive client_id = 2");
+    CHECK(resps[0].status_          == ResponseType::ACCEPTED, "aggressive accepted first");
+    CHECK(resps[0].leaves_qty_      == 10,              "accepted original quantity");
+
     // Resting order response (client 1)
-    CHECK(resps[0].client_id_       == 1,               "resting client_id = 1");
-    CHECK(resps[0].status_          == ResponseType::EXECUTED, "resting status = EXECUTED");
-    CHECK(resps[0].executed_qty_    == 10,              "resting executed_qty = 10");
-    CHECK(resps[0].leaves_qty_      == 0,               "resting leaves_qty = 0");
-    CHECK(resps[0].execution_price_ == 100,             "resting execution_price = 100");
+    CHECK(resps[1].client_id_       == 1,               "resting client_id = 1");
+    CHECK(resps[1].status_          == ResponseType::EXECUTED, "resting status = EXECUTED");
+    CHECK(resps[1].executed_qty_    == 10,              "resting executed_qty = 10");
+    CHECK(resps[1].leaves_qty_      == 0,               "resting leaves_qty = 0");
+    CHECK(resps[1].execution_price_ == 100,             "resting execution_price = 100");
 
     // Aggressive order response (client 2)
-    CHECK(resps[1].client_id_       == 2,               "aggressive client_id = 2");
-    CHECK(resps[1].status_          == ResponseType::EXECUTED, "aggressive status = EXECUTED");
-    CHECK(resps[1].executed_qty_    == 10,              "aggressive executed_qty = 10");
-    CHECK(resps[1].leaves_qty_      == 0,               "aggressive leaves_qty = 0");
+    CHECK(resps[2].client_id_       == 2,               "aggressive client_id = 2");
+    CHECK(resps[2].status_          == ResponseType::EXECUTED, "aggressive status = EXECUTED");
+    CHECK(resps[2].executed_qty_    == 10,              "aggressive executed_qty = 10");
+    CHECK(resps[2].leaves_qty_      == 0,               "aggressive leaves_qty = 0");
+    CHECK(resps[1].match_id_ == resps[2].match_id_ &&
+          resps[1].match_id_ == updates[0].match_id_,   "private and public executions share match ID");
 
     // Market update
     CHECK(updates[0].type_  == UpdateType::TRADE,       "update type = TRADE");
@@ -182,18 +206,18 @@ void test_partial_fill_resting_larger() {
     auto resps   = drainResponses();
     auto updates = drainMarketUpdates();
 
-    // resting EXECUTED (5) + aggressive EXECUTED (5)
-    // resting still has 15 left, no ACCEPTED since it was already on book
-    CHECK(resps.size()   == 2,                          "responseQ has 2 messages");
+    // aggressive ACCEPTED + resting EXECUTED + aggressive EXECUTED
+    CHECK(resps.size()   == 3,                          "responseQ has 3 messages");
     CHECK(updates.size() == 1,                          "marketUpdateQ has 1 message (TRADE)");
 
-    CHECK(resps[0].status_       == ResponseType::EXECUTED, "resting status = EXECUTED");
-    CHECK(resps[0].executed_qty_ == 5,                  "resting executed_qty = 5");
-    CHECK(resps[0].leaves_qty_   == 15,                 "resting leaves_qty = 15");
+    CHECK(resps[0].status_       == ResponseType::ACCEPTED, "aggressive accepted first");
+    CHECK(resps[1].status_       == ResponseType::EXECUTED, "resting status = EXECUTED");
+    CHECK(resps[1].executed_qty_ == 5,                  "resting executed_qty = 5");
+    CHECK(resps[1].leaves_qty_   == 15,                 "resting leaves_qty = 15");
 
-    CHECK(resps[1].status_       == ResponseType::EXECUTED, "aggressive status = EXECUTED");
-    CHECK(resps[1].executed_qty_ == 5,                  "aggressive executed_qty = 5");
-    CHECK(resps[1].leaves_qty_   == 0,                  "aggressive leaves_qty = 0");
+    CHECK(resps[2].status_       == ResponseType::EXECUTED, "aggressive status = EXECUTED");
+    CHECK(resps[2].executed_qty_ == 5,                  "aggressive executed_qty = 5");
+    CHECK(resps[2].leaves_qty_   == 0,                  "aggressive leaves_qty = 0");
 
     CHECK(updates[0].type_ == UpdateType::TRADE,        "update type = TRADE");
     CHECK(updates[0].qty_  == 5,                        "trade qty = 5");
@@ -221,19 +245,18 @@ void test_partial_fill_aggressor_larger() {
     auto resps   = drainResponses();
     auto updates = drainMarketUpdates();
 
-    // resting EXECUTED (5) + aggressive EXECUTED (5) + aggressive ACCEPTED (10)
+    // aggressive ACCEPTED + resting EXECUTED + aggressive EXECUTED
     CHECK(resps.size()   == 3,                          "responseQ has 3 messages");
     CHECK(updates.size() == 2,                          "marketUpdateQ has 2 messages (TRADE + ADD)");
 
-    CHECK(resps[0].status_       == ResponseType::EXECUTED, "resting status = EXECUTED");
-    CHECK(resps[0].executed_qty_ == 5,                  "resting executed_qty = 5");
-    CHECK(resps[0].leaves_qty_   == 0,                  "resting leaves_qty = 0");
+    CHECK(resps[0].status_       == ResponseType::ACCEPTED, "aggressive accepted first");
+    CHECK(resps[0].leaves_qty_   == 15,                 "accepted original quantity");
+    CHECK(resps[1].status_       == ResponseType::EXECUTED, "resting status = EXECUTED");
+    CHECK(resps[1].executed_qty_ == 5,                  "resting executed_qty = 5");
+    CHECK(resps[1].leaves_qty_   == 0,                  "resting leaves_qty = 0");
 
-    CHECK(resps[1].status_       == ResponseType::EXECUTED, "aggressive EXECUTED partial");
-    CHECK(resps[1].executed_qty_ == 5,                  "aggressive executed_qty = 5");
-
-    CHECK(resps[2].status_       == ResponseType::ACCEPTED, "aggressive remainder ACCEPTED");
-    CHECK(resps[2].leaves_qty_   == 10,                 "aggressive leaves_qty = 10");
+    CHECK(resps[2].status_       == ResponseType::EXECUTED, "aggressive EXECUTED partial");
+    CHECK(resps[2].executed_qty_ == 5,                  "aggressive executed_qty = 5");
 
     CHECK(updates[0].type_ == UpdateType::TRADE,        "first update = TRADE");
     CHECK(updates[1].type_ == UpdateType::ADD,          "second update = ADD");
@@ -264,13 +287,18 @@ void test_multi_level_sweep() {
     auto resps   = drainResponses();
     auto updates = drainMarketUpdates();
 
-    // 3 resting EXECUTED + 3 aggressive EXECUTED (one per level)
-    CHECK(resps.size()   == 6,                          "responseQ has 6 messages (3 pairs)");
+    // aggressive ACCEPTED + 3 resting/aggressive execution pairs
+    CHECK(resps.size()   == 7,                          "responseQ has accepted plus 3 execution pairs");
     CHECK(updates.size() == 3,                          "marketUpdateQ has 3 TRADE updates");
 
     for (int i = 0; i < 3; ++i) {
         CHECK(updates[i].type_ == UpdateType::TRADE,    "update type = TRADE");
         CHECK(updates[i].qty_  == 10,                   "trade qty = 10 per level");
+        CHECK(resps[1 + i * 2].match_id_ == resps[2 + i * 2].match_id_ &&
+              resps[1 + i * 2].match_id_ == updates[i].match_id_,
+              "each fill has one shared match ID");
+        if (i > 0) CHECK(updates[i - 1].match_id_ != updates[i].match_id_,
+                         "separate fills have different match IDs");
     }
 }
 
@@ -291,18 +319,19 @@ void test_FAK_remainder_killed() {
     auto resps   = drainResponses();
     auto updates = drainMarketUpdates();
 
-    // resting EXECUTED (3) + aggressive EXECUTED (3) + FAK CANCELED (7)
-    CHECK(resps.size()   == 3,                          "responseQ has 3 messages");
+    // FAK ACCEPTED + resting EXECUTED + aggressive EXECUTED + FAK CANCELED
+    CHECK(resps.size()   == 4,                          "responseQ has 4 messages");
     CHECK(updates.size() == 1,                          "marketUpdateQ has 1 message (TRADE only, no ADD)");
 
-    CHECK(resps[0].status_       == ResponseType::EXECUTED, "resting EXECUTED");
-    CHECK(resps[0].executed_qty_ == 3,                  "resting executed_qty = 3");
+    CHECK(resps[0].status_       == ResponseType::ACCEPTED, "FAK accepted first");
+    CHECK(resps[1].status_       == ResponseType::EXECUTED, "resting EXECUTED");
+    CHECK(resps[1].executed_qty_ == 3,                  "resting executed_qty = 3");
 
-    CHECK(resps[1].status_       == ResponseType::EXECUTED, "aggressive EXECUTED");
-    CHECK(resps[1].executed_qty_ == 3,                  "aggressive executed_qty = 3");
+    CHECK(resps[2].status_       == ResponseType::EXECUTED, "aggressive EXECUTED");
+    CHECK(resps[2].executed_qty_ == 3,                  "aggressive executed_qty = 3");
 
-    CHECK(resps[2].status_       == ResponseType::CANCELED,  "FAK remainder CANCELED");
-    CHECK(resps[2].leaves_qty_   == 7,                  "FAK killed qty = 7");
+    CHECK(resps[3].status_       == ResponseType::CANCELED,  "FAK remainder CANCELED");
+    CHECK(resps[3].leaves_qty_   == 7,                  "FAK killed qty = 7");
 
     CHECK(updates[0].type_ == UpdateType::TRADE,        "update type = TRADE");
 }
@@ -319,11 +348,12 @@ void test_FAK_no_fill() {
     auto resps   = drainResponses();
     auto updates = drainMarketUpdates();
 
-    CHECK(resps.size()   == 1,                          "responseQ has 1 message");
+    CHECK(resps.size()   == 2,                          "responseQ has 2 messages");
     CHECK(updates.size() == 0,                          "marketUpdateQ empty (no TRADE, no ADD)");
 
-    CHECK(resps[0].status_     == ResponseType::CANCELED,   "FAK fully CANCELED");
-    CHECK(resps[0].leaves_qty_ == 10,                   "entire qty killed = 10");
+    CHECK(resps[0].status_     == ResponseType::ACCEPTED,   "FAK accepted first");
+    CHECK(resps[1].status_     == ResponseType::CANCELED,   "FAK fully CANCELED");
+    CHECK(resps[1].leaves_qty_ == 10,                   "entire qty killed = 10");
 }
 
 
@@ -343,11 +373,12 @@ void test_FAK_fully_filled() {
     auto resps   = drainResponses();
     auto updates = drainMarketUpdates();
 
-    CHECK(resps.size()   == 2,                          "responseQ has 2 messages (no CANCELED)");
+    CHECK(resps.size()   == 3,                          "responseQ has accepted plus executions");
     CHECK(updates.size() == 1,                          "marketUpdateQ has 1 TRADE");
 
-    CHECK(resps[0].status_ == ResponseType::EXECUTED,   "resting EXECUTED");
-    CHECK(resps[1].status_ == ResponseType::EXECUTED,   "FAK EXECUTED");
+    CHECK(resps[0].status_ == ResponseType::ACCEPTED,   "FAK accepted first");
+    CHECK(resps[1].status_ == ResponseType::EXECUTED,   "resting EXECUTED");
+    CHECK(resps[2].status_ == ResponseType::EXECUTED,   "FAK EXECUTED");
     CHECK(updates[0].type_ == UpdateType::TRADE,        "update type = TRADE");
 }
 
@@ -373,12 +404,79 @@ void test_cancel_order() {
     CHECK(resps[0].client_id_       == 1,               "client_id correct");
     CHECK(resps[0].client_order_id_ == 40,              "client_order_id correct");
     CHECK(resps[0].execution_price_ == 100,             "execution_price = 100");
-    CHECK(resps[0].leaves_qty_      == 0,               "leaves_qty = 0");
+    CHECK(resps[0].leaves_qty_      == 10,              "canceled quantity = 10");
 
     CHECK(updates[0].type_  == UpdateType::CANCEL,      "update type = CANCEL");
     CHECK(updates[0].price_ == 100,                     "update price = 100");
     CHECK(updates[0].qty_   == 10,                      "update qty = 10");
     CHECK(updates[0].side_  == Side::BUY,               "update side = BUY");
+}
+
+void test_partial_cancel_order() {
+    std::cout << col::CYN << col::BOLD << "\n[10] Cancel order - partial cancel\n" << col::RST;
+    line();
+
+    sendNew(1, 41, 0, OrderType::GoodTillCancel, Side::BUY, 100, 10);
+    drainResponses();
+    drainMarketUpdates();
+
+    sendCancel(1, 41, 0, 4);
+    auto resps = drainResponses();
+    auto updates = drainMarketUpdates();
+
+    CHECK(resps.size() == 1, "responseQ has 1 partial-cancel response");
+    CHECK(updates.size() == 1, "marketUpdateQ has 1 cancel update");
+    CHECK(resps[0].status_ == ResponseType::CANCELED, "status = CANCELED");
+    CHECK(resps[0].leaves_qty_ == 4, "response reports canceled quantity = 4");
+    CHECK(updates[0].qty_ == 4, "ITCH cancel quantity = 4");
+
+    sendCancel(1, 41, 0, 6);
+    resps = drainResponses();
+    updates = drainMarketUpdates();
+    CHECK(resps.size() == 1 && resps[0].status_ == ResponseType::CANCELED,
+          "remaining quantity cancels successfully");
+    CHECK(resps[0].leaves_qty_ == 6, "final cancel quantity = 6");
+    CHECK(updates.size() == 1 && updates[0].qty_ == 6, "final ITCH cancel quantity = 6");
+
+    sendCancel(1, 41, 0, 1);
+    resps = drainResponses();
+    CHECK(resps.size() == 1 && resps[0].status_ == ResponseType::CANCEL_REJECTED,
+           "cancel after order removal is rejected");
+}
+
+void test_replace_order() {
+    std::cout << col::CYN << col::BOLD << "\n[11] Replace order\n" << col::RST;
+    line();
+
+    sendNew(1, 42, 0, OrderType::GoodTillCancel, Side::BUY, 100, 10);
+    drainResponses();
+    drainMarketUpdates();
+
+    sendReplace(1, 42, 43, 0, OrderType::GoodTillCancel, Side::BUY, 101, 12);
+    auto resps = drainResponses();
+    auto updates = drainMarketUpdates();
+
+    CHECK(resps.size() == 1 && resps[0].status_ == ResponseType::MODIFIED,
+          "replacement response is MODIFIED");
+    CHECK(resps[0].client_order_id_ == 43 && resps[0].price_ == 101 && resps[0].qty_ == 12,
+          "replacement uses new client ID, price, and quantity");
+    CHECK(updates.size() == 1 && updates[0].type_ == UpdateType::MODIFY,
+          "public book receives ITCH replace update");
+    CHECK(updates[0].market_order_id_ != updates[0].new_order_id_ && updates[0].price_ == 101 &&
+          updates[0].qty_ == 12, "public replace retires old order ID");
+
+    sendCancel(1, 42, 0);
+    resps = drainResponses();
+    CHECK(resps.size() == 1 && resps[0].status_ == ResponseType::CANCEL_REJECTED,
+          "old client order ID is retired");
+
+    sendCancel(1, 43, 0);
+    resps = drainResponses();
+    updates = drainMarketUpdates();
+    CHECK(resps.size() == 1 && resps[0].status_ == ResponseType::CANCELED &&
+          resps[0].leaves_qty_ == 12, "replacement can be canceled by new client order ID");
+    CHECK(updates.size() == 1 && updates[0].type_ == UpdateType::CANCEL && updates[0].qty_ == 12,
+          "replacement cancel updates public book");
 }
 
 
@@ -444,14 +542,15 @@ void test_FIFO_same_price_level() {
     auto resps   = drainResponses();
     auto updates = drainMarketUpdates();
 
-    // 3 resting EXECUTED + 3 aggressive EXECUTED
-    CHECK(resps.size()   == 6,                          "responseQ has 6 messages");
+    // Aggressive ACCEPTED + 3 resting/aggressive execution pairs
+    CHECK(resps.size()   == 7,                          "responseQ has accepted plus 6 fills");
     CHECK(updates.size() == 3,                          "marketUpdateQ has 3 TRADE updates");
 
     // FIFO: client 1 filled first, then 2, then 3
-    CHECK(resps[0].client_id_ == 1,                     "first fill: client 1 (FIFO)");
-    CHECK(resps[2].client_id_ == 2,                     "second fill: client 2 (FIFO)");
-    CHECK(resps[4].client_id_ == 3,                     "third fill: client 3 (FIFO)");
+    CHECK(resps[0].status_ == ResponseType::ACCEPTED,   "aggressive accepted first");
+    CHECK(resps[1].client_id_ == 1,                     "first fill: client 1 (FIFO)");
+    CHECK(resps[3].client_id_ == 2,                     "second fill: client 2 (FIFO)");
+    CHECK(resps[5].client_id_ == 3,                     "third fill: client 3 (FIFO)");
 }
 
 
@@ -551,6 +650,8 @@ int main() {
     test_FAK_no_fill();
     test_FAK_fully_filled();
     test_cancel_order();
+    test_partial_cancel_order();
+    test_replace_order();
     test_cancel_rejected_unknown_client();
     test_cancel_rejected_unknown_order();
     test_FIFO_same_price_level();
