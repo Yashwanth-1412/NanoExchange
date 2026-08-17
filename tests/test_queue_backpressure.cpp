@@ -1,10 +1,11 @@
-#include <iostream>
-
 #include "QuantLink/Lib/concurrency/lf_queue.h"
 #include "QuantLink/Lib/logging/logger.h"
 #include "src/network/gateway/fifo_process.h"
 
+#include <iostream>
+
 using namespace quantlink;
+using namespace nanoexchange;
 
 namespace {
 
@@ -25,13 +26,13 @@ auto request(OrderId id) -> MEClientRequest {
     return {ClientRequestType::NEW, 1, 0, id, OrderType::GoodTillCancel, Side::BUY, 100, 1};
 }
 
-}  // namespace
+} // namespace
 
 int main() {
-    SPSCQueue<MEClientRequest> requests(4);  // Effective capacity is three.
+    SPSCQueue<MEClientRequest>  requests(4); // Effective capacity is three.
     SPSCQueue<MEClientResponse> responses(4);
-    Logger logger(1024, "test_queue_backpressure.log", -1);
-    FifoNdProcess fifo(&requests, &responses, &logger, 5);
+    Logger                      logger(1024, "test_queue_backpressure.log", -1);
+    FifoNdProcess               fifo(&requests, &responses, &logger, 5);
 
     check(fifo.addToPending(30, request(3)), "accept first request");
     check(fifo.addToPending(10, request(1)), "accept second request");
@@ -53,7 +54,8 @@ int main() {
 
     for (OrderId expected : {4, 5}) {
         const auto* queued = requests.getNextRead();
-        check(queued != nullptr && queued->client_order_id_ == expected, "retried request remains ordered and undropped");
+        check(queued != nullptr && queued->client_order_id_ == expected,
+              "retried request remains ordered and undropped");
         requests.updateNextRead();
     }
 

@@ -3,11 +3,12 @@
 #include <functional>
 #include <unordered_map>
 #include <map>
-#include "../types.h"
-#include "QuantLink/Lib/memory/object_pool_list.h"
+#include "src/types.h"
+#include "QuantLink/Lib/memory/object_pool.h"
 #include "QuantLink/Lib/logging/logger.h"
 #include "QuantLink/Lib/common/macros.h"
 
+using namespace nanoexchange;
 
 class MatchingEngine;
 

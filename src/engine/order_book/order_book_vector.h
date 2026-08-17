@@ -4,10 +4,12 @@
 #include <functional>
 #include <unordered_map>
 #include <map>
-#include "../types.h"
-#include "QuantLink/Lib/memory/object_pool_list.h"
+#include "src/types.h"
+#include "QuantLink/Lib/memory/object_pool.h"
 #include "QuantLink/Lib/logging/logger.h"
 #include "QuantLink/Lib/common/macros.h"
+
+using namespace nanoexchange;
 
 constexpr size_t MAX_PRICE_LEVELS = 256000;
 
@@ -39,22 +41,32 @@ private:
 
     auto insert(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
                 OrderId marketOrderId, OrderType orderType, Price price,
-                Quantity initialQuantity, Side side) -> void;
+                Quantity initialQuantity, Side side, const OrderToken& orderToken) -> void;
 
     auto remove(MEOrder* order) -> void;
 
     auto match(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderId marketOrderId,
-            OrderType orderType, Price price, Quantity initialQuantity, Side side) -> Quantity;
+            OrderType orderType, Price price, Quantity initialQuantity, Side side,
+            const OrderToken& orderToken) -> Quantity;
 
 
 public:
 
     explicit MEOrderBook(size_t size, TickerId tickerId, MatchingEngine* matchingEngine, quantlink::Logger* logger);
 
+    auto addOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderType orderType, Price price,
+                  Quantity initialQuantity, Side side, const OrderToken& orderToken) noexcept -> void;
+
+    auto cancelOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId, Quantity qty,
+                     const OrderToken& orderToken) -> void;
+
     auto addOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
-                OrderType orderType, Price price, Quantity initialQuantity, Side side) noexcept -> void;
+                  OrderType orderType, Price price, Quantity initialQuantity, Side side) noexcept -> void;
 
     auto cancelOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId) -> void;
+
+    auto replaceOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderId newClientOrderId,
+                      OrderType orderType, Price price, Quantity qty, const OrderToken& orderToken) -> void;
 
 
 };

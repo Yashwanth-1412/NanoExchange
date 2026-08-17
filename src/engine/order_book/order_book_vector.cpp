@@ -1,5 +1,5 @@
-#include "order_book_vector.h"
-#include "matching_engine.h"
+#include "src/engine/order_book/order_book_vector.h"
+#include "src/engine/matching_engine.h"
 
 
 MEOrderBook::MEOrderBook(size_t size, TickerId tickerId, MatchingEngine* matchingEngine, quantlink::Logger* logger) : 
@@ -89,10 +89,10 @@ auto MEOrderBook::removePriceLevel(PriceLevel* priceLevel, Side side) -> void {
 
 auto MEOrderBook::insert(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
             OrderId marketOrderId, OrderType orderType, Price price,
-            Quantity initialQuantity, Side side) -> void {
+            Quantity initialQuantity, Side side, const OrderToken& orderToken) -> void {
 
     MEOrder* order = pool_.allocate(tickerId, clientId, clientOrderId,
-                                    marketOrderId, orderType, price, initialQuantity, side);
+                                    marketOrderId, orderType, price, initialQuantity, side, orderToken);
 
     PriceLevel* priceLevel = (side == Side::BUY) ? &bids_[price] : &asks_[price];
 
@@ -144,7 +144,8 @@ auto MEOrderBook::remove(MEOrder* order) -> void {
 
 
 auto MEOrderBook::match(TickerId tickerId, ClientId clientId, OrderId clientOrderId, OrderId marketOrderId,
-        OrderType orderType, Price price, Quantity initialQuantity, Side side) -> Quantity {
+        OrderType orderType, Price price, Quantity initialQuantity, Side side,
+        const OrderToken& orderToken) -> Quantity {
 
     Quantity remainingQuantity = initialQuantity;
 
@@ -157,6 +158,7 @@ auto MEOrderBook::match(TickerId tickerId, ClientId clientId, OrderId clientOrde
             while (level->head && remainingQuantity > 0) {
                 MEOrder* restingOrder = level->head;
                 Quantity fill = std::min(remainingQuantity, restingOrder->remainingQuantity_);
+                const OrderId matchId = matchingEngine_ ? matchingEngine_->nextMatchId() : OrderId_INVALID;
 
                 remainingQuantity                -= fill;
                 restingOrder->remainingQuantity_ -= fill;
@@ -165,16 +167,18 @@ auto MEOrderBook::match(TickerId tickerId, ClientId clientId, OrderId clientOrde
                     restingOrder->clientId_, tickerId, restingOrder->clientOrderId_, restingOrder->marketOrderId_,
                     restingOrder->side_, restingOrder->price_, restingOrder->initialQuantity_, restingOrder->orderType_,
                     ResponseType::EXECUTED,
-                    fill, level->price_, restingOrder->remainingQuantity_
+                    fill, level->price_, restingOrder->remainingQuantity_, matchId
                 };
+                restingResponse.order_token_ = restingOrder->order_token_;
                 sendClientResponse(matchingEngine_, &restingResponse);
 
                 MEClientResponse aggressiveResponse{
                     clientId, tickerId, clientOrderId, marketOrderId,
                     side, price, initialQuantity, orderType,
                     ResponseType::EXECUTED,
-                    fill, level->price_, remainingQuantity
+                    fill, level->price_, remainingQuantity, matchId
                 };
+                aggressiveResponse.order_token_ = orderToken;
                 sendClientResponse(matchingEngine_, &aggressiveResponse);
 
                 MEMarketUpdate marketUpdate{
@@ -198,6 +202,7 @@ auto MEOrderBook::match(TickerId tickerId, ClientId clientId, OrderId clientOrde
             while (level->head && remainingQuantity > 0) {
                 MEOrder* restingOrder = level->head;
                 Quantity fill = std::min(remainingQuantity, restingOrder->remainingQuantity_);
+                const OrderId matchId = matchingEngine_ ? matchingEngine_->nextMatchId() : OrderId_INVALID;
 
                 remainingQuantity                -= fill;
                 restingOrder->remainingQuantity_ -= fill;
@@ -206,16 +211,18 @@ auto MEOrderBook::match(TickerId tickerId, ClientId clientId, OrderId clientOrde
                     restingOrder->clientId_, tickerId, restingOrder->clientOrderId_, restingOrder->marketOrderId_,
                     restingOrder->side_, restingOrder->price_, restingOrder->initialQuantity_, restingOrder->orderType_,
                     ResponseType::EXECUTED,
-                    fill, level->price_, restingOrder->remainingQuantity_
+                    fill, level->price_, restingOrder->remainingQuantity_, matchId
                 };
+                restingResponse.order_token_ = restingOrder->order_token_;
                 sendClientResponse(matchingEngine_, &restingResponse);
 
                 MEClientResponse aggressiveResponse{
                     clientId, tickerId, clientOrderId, marketOrderId,
                     side, price, initialQuantity, orderType,
                     ResponseType::EXECUTED,
-                    fill, level->price_, remainingQuantity
+                    fill, level->price_, remainingQuantity, matchId
                 };
+                aggressiveResponse.order_token_ = orderToken;
                 sendClientResponse(matchingEngine_, &aggressiveResponse);
 
                 MEMarketUpdate marketUpdate{
@@ -236,24 +243,26 @@ auto MEOrderBook::match(TickerId tickerId, ClientId clientId, OrderId clientOrde
 
 
 auto MEOrderBook::addOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
-            OrderType orderType, Price price, Quantity initialQuantity, Side side) noexcept -> void {
+            OrderType orderType, Price price, Quantity initialQuantity, Side side,
+            const OrderToken& orderToken) noexcept -> void {
     
     OrderId marketOrderId = nextMarketOrderId++;
 
+    MEClientResponse accepted{
+        clientId, tickerId, clientOrderId, marketOrderId,
+        side, price, initialQuantity, orderType,
+        ResponseType::ACCEPTED, 0, price, initialQuantity
+    };
+    accepted.order_token_ = orderToken;
+    sendClientResponse(matchingEngine_, &accepted);
+
     Quantity remainingQuantity = match(tickerId, clientId, clientOrderId, marketOrderId, 
-                                    orderType, price, initialQuantity, side);
+                                     orderType, price, initialQuantity, side, orderToken);
 
     if (remainingQuantity > 0) {
         if (orderType == OrderType::GoodTillCancel) {
-            insert(tickerId, clientId, clientOrderId, marketOrderId, orderType, price, remainingQuantity, side);
-
-            MEClientResponse response{
-                clientId, tickerId, clientOrderId, marketOrderId,
-                side, price, initialQuantity, orderType,
-                ResponseType::ACCEPTED,
-                0, price, remainingQuantity
-            };
-            sendClientResponse(matchingEngine_, &response);
+            insert(tickerId, clientId, clientOrderId, marketOrderId, orderType, price, remainingQuantity, side,
+                   orderToken);
 
             MEMarketUpdate marketUpdate{
                 tickerId, marketOrderId, UpdateType::ADD,
@@ -268,12 +277,19 @@ auto MEOrderBook::addOrder(TickerId tickerId, ClientId clientId, OrderId clientO
                 ResponseType::CANCELED,
                 0, price, remainingQuantity
             };
+            response.order_token_ = orderToken;
             sendClientResponse(matchingEngine_, &response);
         }
     }
 }
 
-auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId) -> void {
+auto MEOrderBook::addOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
+                           OrderType orderType, Price price, Quantity initialQuantity, Side side) noexcept -> void {
+    addOrder(tickerId, clientId, clientOrderId, orderType, price, initialQuantity, side, {});
+}
+
+auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId, Quantity qty,
+                              const OrderToken& orderToken) -> void {
 
     auto clientIt = orders_.find(clientId);
     if (UNLIKELY(clientIt == orders_.end())) {
@@ -284,6 +300,7 @@ auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clie
             ResponseType::CANCEL_REJECTED,
             0, Price_INVALID, 0
         };
+        response.order_token_ = orderToken;
         sendClientResponse(matchingEngine_, &response);
         return;
     }
@@ -297,15 +314,30 @@ auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clie
             ResponseType::CANCEL_REJECTED,
             0, Price_INVALID, 0
         };
+        response.order_token_ = orderToken;
         sendClientResponse(matchingEngine_, &response);
         return;
     }
 
     MEOrder* order = clientOrderIt->second;
 
+    const Quantity canceledQty = qty == 0 ? order->remainingQuantity_ : qty;
+    if (canceledQty > order->remainingQuantity_) {
+        MEClientResponse response{
+            clientId, tickerId, clientOrderId, order->marketOrderId_,
+            order->side_, order->price_, order->initialQuantity_, order->orderType_,
+            ResponseType::CANCEL_REJECTED, 0, Price_INVALID, order->remainingQuantity_
+        };
+        response.order_token_ = order->order_token_;
+        sendClientResponse(matchingEngine_, &response);
+        return;
+    }
+
+    order->remainingQuantity_ -= canceledQty;
+
     MEMarketUpdate marketUpdate{
         tickerId, order->marketOrderId_, UpdateType::CANCEL,
-        order->side_, order->price_, order->remainingQuantity_
+        order->side_, order->price_, canceledQty
     };
     sendMarketUpdate(matchingEngine_, &marketUpdate);
 
@@ -313,9 +345,58 @@ auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clie
         clientId, tickerId, clientOrderId, order->marketOrderId_,
         order->side_, order->price_, order->initialQuantity_, order->orderType_,
         ResponseType::CANCELED,
-        0, order->price_, 0
+        0, order->price_, order->remainingQuantity_
     };
+    response.order_token_ = order->order_token_;
     sendClientResponse(matchingEngine_, &response);
 
-    remove(order);
+    if (order->remainingQuantity_ == 0)
+        remove(order);
+}
+
+auto MEOrderBook::cancelOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId) -> void {
+    cancelOrder(tickerId, clientId, clientOrderId, 0, {});
+}
+
+auto MEOrderBook::replaceOrder(TickerId tickerId, ClientId clientId, OrderId clientOrderId,
+                               OrderId newClientOrderId, OrderType orderType, Price price, Quantity qty,
+                               const OrderToken& orderToken) -> void {
+    const auto clientIt = orders_.find(clientId);
+    if (clientIt == orders_.end()) {
+        MEClientResponse response{clientId, tickerId, clientOrderId, OrderId_INVALID, Side::BUY, Price_INVALID, 0,
+                                  OrderType::GoodTillCancel, ResponseType::CANCEL_REJECTED, 0, Price_INVALID, 0};
+        response.order_token_ = orderToken;
+        sendClientResponse(matchingEngine_, &response);
+        return;
+    }
+
+    const auto orderIt = clientIt->second.find(clientOrderId);
+    if (orderIt == clientIt->second.end() || newClientOrderId == 0 || qty == 0) {
+        MEClientResponse response{clientId, tickerId, clientOrderId, OrderId_INVALID, Side::BUY, Price_INVALID, 0,
+                                  OrderType::GoodTillCancel, ResponseType::CANCEL_REJECTED, 0, Price_INVALID, 0};
+        response.order_token_ = orderToken;
+        sendClientResponse(matchingEngine_, &response);
+        return;
+    }
+
+    MEOrder* oldOrder = orderIt->second;
+    const Side side = oldOrder->side_;
+    const OrderId oldMarketOrderId = oldOrder->marketOrderId_;
+    const OrderId newMarketOrderId = nextMarketOrderId++;
+    remove(oldOrder);
+
+    MEClientResponse replaced{clientId, tickerId, newClientOrderId, newMarketOrderId, side,
+                              price, qty, orderType, ResponseType::MODIFIED, 0, price, qty};
+    replaced.order_token_ = orderToken;
+    sendClientResponse(matchingEngine_, &replaced);
+
+    MEMarketUpdate modified{tickerId, oldMarketOrderId, UpdateType::MODIFY, side, price, qty,
+                            newMarketOrderId};
+    sendMarketUpdate(matchingEngine_, &modified);
+
+    const Quantity remaining = match(tickerId, clientId, newClientOrderId, newMarketOrderId,
+                                     orderType, price, qty, side, orderToken);
+    if (remaining > 0 && orderType == OrderType::GoodTillCancel)
+        insert(tickerId, clientId, newClientOrderId, newMarketOrderId, orderType, price, remaining, side,
+               orderToken);
 }

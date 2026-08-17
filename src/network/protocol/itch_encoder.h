@@ -1,13 +1,14 @@
 #pragma once
 
+#include "src/types.h"
+#include "QuantLink/Lib/logging/time_utils.h"
+#include "QuantLink/Lib/protocol/itch_messages.h"
+
 #include <cstdint>
 #include <cstring>
 
-#include "../../types.h"
-#include "QuantLink/Lib/protocol/itch_messages.h"
-#include "QuantLink/Lib/logging/time_utils.h"
-
 using namespace quantlink::itch;
+using namespace nanoexchange;
 
 inline void writeTimestamp(uint8_t* dst) noexcept {
     uint64_t ns_since_midnight = quantlink::utils::get_nanos_since_midnight();
@@ -32,75 +33,75 @@ inline void copyStock(char* dst, TickerId ticker_id) noexcept {
 inline size_t encode(const MEMarketUpdate& u, void* buf) noexcept {
     switch (u.type_) {
 
-        case UpdateType::ADD: {
-            AddOrder msg{};
+    case UpdateType::ADD: {
+        AddOrder msg{};
 
-            msg.msgtype_ = enums::MsgType::ADD_ORDER;
-            msg.stock_locate = swap16(getStockLocate(u.ticker_id_));
-            msg.tracking_number = 0;
-            writeTimestamp(msg.timestamp);
-            msg.order_ref_num  = swap64(u.market_order_id_);
-            msg.buy_sell = (u.side_ == Side::BUY) ? 'B' : 'S';
-            msg.shares = swap32(static_cast<uint32_t>(u.qty_));
-            
-            // This now executes in 1 instruction
-            copyStock(msg.stock, u.ticker_id_); 
-            
-            msg.price = swap32(static_cast<uint32_t>(u.price_));
+        msg.msgtype_        = enums::MsgType::ADD_ORDER;
+        msg.stock_locate    = swap16(getStockLocate(u.ticker_id_));
+        msg.tracking_number = 0;
+        writeTimestamp(msg.timestamp);
+        msg.order_ref_num = swap64(u.market_order_id_);
+        msg.buy_sell      = (u.side_ == Side::BUY) ? 'B' : 'S';
+        msg.shares        = swap32(static_cast<uint32_t>(u.qty_));
 
-            std::memcpy(buf, &msg, sizeof(msg));
-            return sizeof(msg);
-        }
+        // This now executes in 1 instruction
+        copyStock(msg.stock, u.ticker_id_);
 
-        case UpdateType::CANCEL: {
-            OrderDelete msg{};
+        msg.price = swap32(static_cast<uint32_t>(u.price_));
 
-            msg.type = enums::MsgType::ORDER_DELETE;
-            msg.stock_locate = swap16(getStockLocate(u.ticker_id_));
-            msg.tracking_number = 0;
-            writeTimestamp(msg.timestamp);
-            msg.order_ref_num = swap64(u.market_order_id_);
+        std::memcpy(buf, &msg, sizeof(msg));
+        return sizeof(msg);
+    }
 
-            std::memcpy(buf, &msg, sizeof(msg));
-            return sizeof(msg);
-        }
+    case UpdateType::CANCEL: {
+        OrderDelete msg{};
 
-        case UpdateType::TRADE: {
-            OrderExecuted msg{};
+        msg.type            = enums::MsgType::ORDER_DELETE;
+        msg.stock_locate    = swap16(getStockLocate(u.ticker_id_));
+        msg.tracking_number = 0;
+        writeTimestamp(msg.timestamp);
+        msg.order_ref_num = swap64(u.market_order_id_);
 
-            msg.type = enums::MsgType::ORDER_EXECUTED;
-            msg.stock_locate = swap16(getStockLocate(u.ticker_id_));
-            msg.tracking_number = 0;
-            writeTimestamp(msg.timestamp);
-            msg.order_ref_num = swap64(u.market_order_id_);
-            msg.executed_shares = swap32(static_cast<uint32_t>(u.qty_));
-            msg.match_number = swap64(u.match_id_);
+        std::memcpy(buf, &msg, sizeof(msg));
+        return sizeof(msg);
+    }
 
-            std::memcpy(buf, &msg, sizeof(msg));
-            return sizeof(msg);
-        }
+    case UpdateType::TRADE: {
+        OrderExecuted msg{};
 
-        case UpdateType::MODIFY: {
-            OrderReplace msg{};
- 
-            msg.type = enums::MsgType::ORDER_REPLACE;
-            msg.stock_locate = swap16(getStockLocate(u.ticker_id_));
-            msg.tracking_number = 0;
-            writeTimestamp(msg.timestamp);
-            msg.original_order_ref = swap64(u.market_order_id_);
-            msg.new_order_ref = swap64(u.new_order_id_);
-            msg.shares = swap32(static_cast<uint32_t>(u.qty_));
-            msg.price = swap32(static_cast<uint32_t>(u.price_));
+        msg.type            = enums::MsgType::ORDER_EXECUTED;
+        msg.stock_locate    = swap16(getStockLocate(u.ticker_id_));
+        msg.tracking_number = 0;
+        writeTimestamp(msg.timestamp);
+        msg.order_ref_num   = swap64(u.market_order_id_);
+        msg.executed_shares = swap32(static_cast<uint32_t>(u.qty_));
+        msg.match_number    = swap64(u.match_id_);
 
-            std::memcpy(buf, &msg, sizeof(msg));
-            return sizeof(msg);
-        }
+        std::memcpy(buf, &msg, sizeof(msg));
+        return sizeof(msg);
+    }
 
-        // Snapshot control messages — not sent on the incremental ITCH feed
-        case UpdateType::SNAPSHOT_START:
-        case UpdateType::SNAPSHOT_END:
-        case UpdateType::CLEAR:
-        default:
-            return 0;
+    case UpdateType::MODIFY: {
+        OrderReplace msg{};
+
+        msg.type            = enums::MsgType::ORDER_REPLACE;
+        msg.stock_locate    = swap16(getStockLocate(u.ticker_id_));
+        msg.tracking_number = 0;
+        writeTimestamp(msg.timestamp);
+        msg.original_order_ref = swap64(u.market_order_id_);
+        msg.new_order_ref      = swap64(u.new_order_id_);
+        msg.shares             = swap32(static_cast<uint32_t>(u.qty_));
+        msg.price              = swap32(static_cast<uint32_t>(u.price_));
+
+        std::memcpy(buf, &msg, sizeof(msg));
+        return sizeof(msg);
+    }
+
+    // Snapshot control messages — not sent on the incremental ITCH feed
+    case UpdateType::SNAPSHOT_START:
+    case UpdateType::SNAPSHOT_END:
+    case UpdateType::CLEAR:
+    default:
+        return 0;
     }
 }

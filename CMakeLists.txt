@@ -8,8 +8,19 @@ set(CMAKE_CXX_FLAGS "-O3 -march=native -Wall -Wextra")
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/QuantLink)
+# ── Helper: define an executable with the shared NanoExchange setup ────────────
+#
+# Every target needs the same include roots (repo root for "src/..." paths and
+# the vendored QuantLink submodule for "QuantLink/Lib/..." paths) and pthreads.
+# This helper removes the per-target boilerplate that used to be copy-pasted.
+
+function(nanoexchange_add_executable target)
+    add_executable(${target} ${ARGN})
+    target_include_directories(${target} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink)
+    target_link_libraries(${target} PRIVATE Threads::Threads)
+endfunction()
 
 # ── Main Exchange Binary ───────────────────────────────────────────────────────
 #
@@ -17,102 +28,73 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/QuantLink)
 #    MatchingEngine + OrderServer (gateway) + MarketDataPublisher
 #
 #  src/main.cpp is the entry point.
-#  All .cpp files under src/engine/ and src/network/ are compiled in.
 
-add_executable(NanoExchange
+nanoexchange_add_executable(NanoExchange
     src/main.cpp
     src/engine/matching_engine.cpp
-    src/engine/order_book_map.cpp
+    src/engine/order_book/order_book_map.cpp
 )
+target_link_options(NanoExchange PRIVATE -rdynamic) # crash handler symbolisation
 
-target_include_directories(NanoExchange PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    
-    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
+# ── Vector Order Book Candidate ────────────────────────────────────────────────
+#
+# Keep the map implementation as the production binary while exposing the
+# dense-vector book as a directly comparable executable. Selected at compile
+# time by NANOEXCHANGE_USE_VECTOR_ORDER_BOOK; no virtual dispatch involved.
+
+nanoexchange_add_executable(NanoExchangeVector
+    src/main.cpp
+    src/engine/matching_engine.cpp
+    src/engine/order_book/order_book_vector.cpp
 )
-
-target_link_libraries(NanoExchange PRIVATE Threads::Threads)
-target_link_options(NanoExchange PRIVATE -rdynamic)
+target_compile_definitions(NanoExchangeVector PRIVATE NANOEXCHANGE_USE_VECTOR_ORDER_BOOK)
+target_link_options(NanoExchangeVector PRIVATE -rdynamic)
 
 # ── Order Book Unit Test ───────────────────────────────────────────────────────
 
-add_executable(ob_test
+nanoexchange_add_executable(ob_test
     tests/order_book_test.cpp
-    src/engine/order_book_vector.cpp
+    src/engine/order_book/order_book_vector.cpp
 )
 
-target_include_directories(ob_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
-)
+# ── Order Book Variant Benchmark ───────────────────────────────────────────────
 
-target_link_libraries(ob_test PRIVATE Threads::Threads)
-
-# ── Order Book Variant Benchmark ──────────────────────────────────────────────
-
-add_executable(ob_compare
+nanoexchange_add_executable(ob_compare
     tests/ob_compare.cpp
 )
 
-target_include_directories(ob_compare PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
+# ── Cache-line / false-sharing benchmark ───────────────────────────────────────
+
+nanoexchange_add_executable(cache_line_benchmark
+    tests/cache_line_benchmark.cpp
 )
 
-target_link_libraries(ob_compare PRIVATE Threads::Threads)
+# ── Matching Engine Unit Test ──────────────────────────────────────────────────
 
-# ── Matching Engine Unit Test ─────────────────────────────────────────────────
-
-add_executable(me_test
+nanoexchange_add_executable(me_test
     tests/test_matching_engine.cpp
     src/engine/matching_engine.cpp
-    src/engine/order_book_map.cpp
+    src/engine/order_book/order_book_map.cpp
 )
 
-target_include_directories(me_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
-)
+# ── Integration Test ───────────────────────────────────────────────────────────
 
-target_link_libraries(me_test PRIVATE Threads::Threads)
-
-# ── Integration Test ──────────────────────────────────────────────────────────
-
-add_executable(integration_test
+nanoexchange_add_executable(integration_test
     tests/test_integration.cpp
     src/engine/matching_engine.cpp
-    src/engine/order_book_map.cpp
+    src/engine/order_book/order_book_map.cpp
 )
 
-target_include_directories(integration_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
-)
+# ── Protocol / backpressure tests ──────────────────────────────────────────────
 
-target_link_libraries(integration_test PRIVATE Threads::Threads)
-
-add_executable(test_protocol_price
+nanoexchange_add_executable(test_protocol_price
     tests/test_protocol_price.cpp
 )
 
-target_include_directories(test_protocol_price PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
-)
-
-target_link_libraries(test_protocol_price PRIVATE Threads::Threads)
-
-add_executable(test_queue_backpressure
+nanoexchange_add_executable(test_queue_backpressure
     tests/test_queue_backpressure.cpp
 )
 
-target_include_directories(test_queue_backpressure PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/QuantLink
-)
+# ── Print all targets for convenience ──────────────────────────────────────────
 
-target_link_libraries(test_queue_backpressure PRIVATE Threads::Threads)
-
-# ── Print all targets for convenience ─────────────────────────────────────────
-
-message(STATUS "Targets: NanoExchange | ob_test | ob_compare | me_test | integration_test")
+message(STATUS "Targets: NanoExchange | NanoExchangeVector | ob_test | ob_compare | me_test | integration_test | test_protocol_price | test_queue_backpressure | cache_line_benchmark")
