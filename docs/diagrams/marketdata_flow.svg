@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="980" viewBox="0 0 1500 980"
+font-family="DejaVu Sans, Helvetica, Arial, sans-serif">
+<defs>
+ <marker id="b" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#1a5fb4"/></marker>
+ <marker id="p" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#8a5fc0"/></marker>
+ <marker id="g" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 Z" fill="#666"/></marker>
+</defs>
+
+<text x="750" y="35" text-anchor="middle" font-size="24" font-weight="bold" fill="#222">
+ NanoExchange — Incremental Feed &amp; Snapshot / Replay
+</text>
+<text x="750" y="58" text-anchor="middle" font-size="11" fill="#666">
+ Matching engine on the left · live feed flows right · recovery stays in its own lower lane
+</text>
+
+<!-- ================= LIVE LANE ================= -->
+<rect x="35" y="80" width="1430" height="365" rx="16" fill="#f7f9fc" stroke="#8aa3c0" stroke-width="2"/>
+<text x="60" y="108" font-size="13" font-weight="bold" fill="#274a86">LIVE MARKET-DATA PATH</text>
+
+<!-- Matching Engine LEFT -->
+<rect x="65" y="135" width="365" height="275" rx="12" fill="#fae3e3" stroke="#c05252" stroke-width="2"/>
+<text x="85" y="162" font-size="14" font-weight="bold" fill="#7a2424">MATCHING ENGINE THREAD</text>
+<text x="410" y="162" text-anchor="end" font-size="11" fill="#7a2424">pinned core</text>
+
+<rect x="85" y="185" width="325" height="72" rx="8" fill="#fff" stroke="#a04040"/>
+<text x="247" y="207" text-anchor="middle" font-size="12.5" font-weight="bold">Dispatcher</text>
+<text x="247" y="228" text-anchor="middle" font-size="10.5" fill="#555">NEW / CANCEL / MODIFY · per-ticker routing</text>
+<text x="247" y="245" text-anchor="middle" font-size="10.5" fill="#555">marketUpdateQ → dispatcher</text>
+
+<rect x="85" y="271" width="325" height="116" rx="8" fill="#fff" stroke="#a04040"/>
+<text x="247" y="294" text-anchor="middle" font-size="12.5" font-weight="bold">Limit order books · per ticker</text>
+<rect x="130" y="307" width="115" height="24" fill="#e8f5e9" stroke="#2e7d32"/>
+<text x="187" y="324" text-anchor="middle" font-size="10">BIDS 11.90 …</text>
+<rect x="265" y="307" width="115" height="24" fill="#ffebee" stroke="#c62828"/>
+<text x="322" y="324" text-anchor="middle" font-size="10">ASKS 12.00 …</text>
+<text x="247" y="350" text-anchor="middle" font-size="10" fill="#777">price-time FIFO · object-pool orders · no alloc</text>
+<text x="247" y="368" text-anchor="middle" font-size="10" fill="#a04040">sendMarketUpdate → marketUpdateQ</text>
+
+<!-- Publisher CENTER -->
+<rect x="475" y="135" width="390" height="275" rx="12" fill="#e3e9f6" stroke="#4a6bb5" stroke-width="2"/>
+<text x="495" y="162" font-size="14" font-weight="bold" fill="#274a86">MARKET DATA PUBLISHER</text>
+<text x="845" y="162" text-anchor="end" font-size="11" fill="#274a86">pinned core</text>
+
+<rect x="495" y="185" width="165" height="92" rx="8" fill="#fff" stroke="#4a6bb5"/>
+<text x="577" y="207" text-anchor="middle" font-size="12.5" font-weight="bold">ITCH encoder + seq</text>
+<text x="577" y="228" text-anchor="middle" font-size="10.5" fill="#444">encode() once</text>
+<text x="577" y="245" text-anchor="middle" font-size="10.5" fill="#444">SnapshotUpdate{update, seq}</text>
+<text x="577" y="262" text-anchor="middle" font-size="10.5" fill="#444">seq_be = swap64(seq)</text>
+
+<rect x="680" y="185" width="165" height="92" rx="8" fill="#fff" stroke="#4a6bb5"/>
+<text x="762" y="207" text-anchor="middle" font-size="12.5" font-weight="bold">UDP fanout</text>
+<text x="762" y="228" text-anchor="middle" font-size="10.5" fill="#444">same encoded bytes</text>
+<text x="762" y="245" text-anchor="middle" font-size="10.5" fill="#444">registry 64 × {addr,last_seen}</text>
+<text x="762" y="262" text-anchor="middle" font-size="10.5" fill="#444">evict slow · lease 5 s</text>
+
+<rect x="495" y="295" width="165" height="92" rx="8" fill="#fff" stroke="#4a6bb5"/>
+<text x="577" y="317" text-anchor="middle" font-size="12.5" font-weight="bold">snapQ</text>
+<text x="577" y="338" text-anchor="middle" font-size="10.5" fill="#444">pushBlocking(snap)</text>
+<text x="577" y="355" text-anchor="middle" font-size="10.5" fill="#444">SPSC · same update object</text>
+<text x="577" y="372" text-anchor="middle" font-size="10.5" fill="#444">no re-encode</text>
+
+<rect x="680" y="295" width="165" height="92" rx="8" fill="#fff" stroke="#4a6bb5"/>
+<text x="762" y="317" text-anchor="middle" font-size="12.5" font-weight="bold">Seq + metrics</text>
+<text x="762" y="338" text-anchor="middle" font-size="10.5" fill="#444">next_seq_num_++</text>
+<text x="762" y="355" text-anchor="middle" font-size="10.5" fill="#444">published_count_ relaxed</text>
+<text x="762" y="372" text-anchor="middle" font-size="10.5" fill="#444">monitoring export</text>
+
+<line x1="660" y1="231" x2="676" y2="231" stroke="#666" stroke-width="1.5" marker-end="url(#g)"/>
+<line x1="577" y1="277" x2="577" y2="291" stroke="#666" stroke-width="1.5" marker-end="url(#g)"/>
+<line x1="762" y1="277" x2="762" y2="291" stroke="#666" stroke-width="1.5" marker-end="url(#g)"/>
+
+<!-- Queue from publisher back to matching engine: bottom return lane -->
+<path d="M430 338 H450 V215 H475" fill="none" stroke="#1a5fb4" stroke-width="2.5" marker-end="url(#b)"/>
+<rect x="420" y="325" width="105" height="26" rx="13" fill="#1a5fb4"/>
+<text x="472" y="343" text-anchor="middle" font-size="9.5" fill="#fff">marketUpdateQ</text>
+
+<!-- UDP path ABOVE all blocks -->
+<path d="M845 175 H1010" fill="none" stroke="#1a5fb4" stroke-width="2.5" marker-end="url(#b)"/>
+<text x="930" y="166" text-anchor="middle" font-size="10" fill="#1a5fb4">ITCH + seq · UDP</text>
+
+<!-- UDP Subscribers RIGHT -->
+<rect x="1010" y="135" width="425" height="275" rx="12" fill="#fff" stroke="#1a5fb4" stroke-width="2"/>
+<text x="1222" y="162" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a5fb4">UDP SUBSCRIBERS</text>
+
+<rect x="1035" y="185" width="375" height="48" rx="8" fill="#eef4fd" stroke="#4a6bb5"/>
+<text x="1222" y="205" text-anchor="middle" font-size="11">recv [seq][ITCH] datagram → check sequence</text>
+<text x="1222" y="221" text-anchor="middle" font-size="10" fill="#666">seq == expected + 1 ?</text>
+
+<rect x="1035" y="250" width="175" height="62" rx="8" fill="#fff" stroke="#8a5fc0"/>
+<text x="1122" y="273" text-anchor="middle" font-size="11" font-weight="bold" fill="#5b3591">GAP ≤ 8192</text>
+<text x="1122" y="292" text-anchor="middle" font-size="10" fill="#5b3591">request R · replay</text>
+
+<rect x="1235" y="250" width="175" height="62" rx="8" fill="#fff" stroke="#8a5fc0"/>
+<text x="1322" y="273" text-anchor="middle" font-size="11" font-weight="bold" fill="#5b3591">GAP &gt; 8192</text>
+<text x="1322" y="292" text-anchor="middle" font-size="10" fill="#5b3591">request S · snapshot</text>
+
+<text x="1222" y="345" text-anchor="middle" font-size="10" fill="#666">resume live feed after recovery</text>
+<line x1="1222" y1="233" x2="1222" y2="246" stroke="#666" stroke-width="1.5" marker-end="url(#g)"/>
+
+<!-- ================= RECOVERY LANE ================= -->
+<rect x="35" y="475" width="1430" height="405" rx="16" fill="#f1eafa" stroke="#d4c3e8" stroke-width="2"/>
+<text x="60" y="503" font-size="13" font-weight="bold" fill="#5b3591">SNAPSHOT / REPLAY RECOVERY PATH</text>
+
+<!-- Snapshot streamer -->
+<rect x="65" y="530" width="955" height="325" rx="12" fill="#ece2f4" stroke="#8a5fc0" stroke-width="2"/>
+<text x="85" y="557" font-size="14" font-weight="bold" fill="#5b3591">SNAPSHOT STREAMER</text>
+<text x="995" y="557" text-anchor="end" font-size="11" fill="#5b3591">pinned core</text>
+
+<rect x="90" y="580" width="185" height="80" rx="8" fill="#fff" stroke="#8a5fc0"/>
+<text x="182" y="604" text-anchor="middle" font-size="12.5" font-weight="bold">Drain snapQ</text>
+<text x="182" y="625" text-anchor="middle" font-size="10.5" fill="#555">busy-poll · single owner</text>
+<text x="182" y="643" text-anchor="middle" font-size="10.5" fill="#555">consume each update once</text>
+
+<rect x="320" y="580" width="285" height="80" rx="8" fill="#fff" stroke="#8a5fc0"/>
+<text x="462" y="604" text-anchor="middle" font-size="12.5" font-weight="bold">Shadow book</text>
+<text x="462" y="625" text-anchor="middle" font-size="10.5" fill="#444">ADD→upsert · CANCEL→erase · MODIFY→remap</text>
+<text x="462" y="643" text-anchor="middle" font-size="10.5" fill="#444">TRADE→qty− / erase · dirty_=true</text>
+
+<rect x="650" y="580" width="285" height="80" rx="8" fill="#fff" stroke="#8a5fc0"/>
+<text x="792" y="604" text-anchor="middle" font-size="12.5" font-weight="bold">Replay ring</text>
+<text x="792" y="625" text-anchor="middle" font-size="10.5" fill="#444">8192 × 64 B · ReplayEntry{seq, bytes, len}</text>
+<text x="792" y="643" text-anchor="middle" font-size="10.5" fill="#444">slot=(seq−1)&amp;8191 · last_seq_num_</text>
+
+<line x1="275" y1="620" x2="314" y2="620" stroke="#8a5fc0" stroke-width="2.5" marker-end="url(#p)"/>
+<line x1="605" y1="620" x2="644" y2="620" stroke="#8a5fc0" stroke-width="2.5" marker-end="url(#p)"/>
+
+<rect x="320" y="700" width="285" height="92" rx="8" fill="#fff" stroke="#8a5fc0"/>
+<text x="462" y="723" text-anchor="middle" font-size="12.5" font-weight="bold">Snapshot bake</text>
+<text x="462" y="744" text-anchor="middle" font-size="10.5" fill="#444">pre-baked flat buffer · only when dirty_</text>
+<text x="462" y="761" text-anchor="middle" font-size="10.5" fill="#444">START(last_seq) → CLEAR + AddOrder</text>
+<text x="462" y="778" text-anchor="middle" font-size="10.5" fill="#444">→ END · one coherent snapshot</text>
+
+<rect x="650" y="700" width="285" height="92" rx="8" fill="#fff" stroke="#8a5fc0"/>
+<text x="792" y="723" text-anchor="middle" font-size="12.5" font-weight="bold">Replay flatten</text>
+<text x="792" y="744" text-anchor="middle" font-size="10.5" fill="#444">replay_scratch_ for (client_seq, last]</text>
+<text x="792" y="761" text-anchor="middle" font-size="10.5" fill="#444">flat copy + ONE send()</text>
+<text x="792" y="778" text-anchor="middle" font-size="10.5" fill="#444">≈53 µs vs 376 µs gather</text>
+
+<line x1="462" y1="660" x2="462" y2="694" stroke="#8a5fc0" stroke-width="2.5" marker-end="url(#p)"/>
+<line x1="792" y1="660" x2="792" y2="694" stroke="#8a5fc0" stroke-width="2.5" marker-end="url(#p)"/>
+
+<rect x="90" y="810" width="845" height="28" rx="7" fill="#fff" stroke="#8a5fc0"/>
+<text x="512" y="829" text-anchor="middle" font-size="9.5" fill="#555">
+TCP server · poll 1 ms · S=bake+send · R=replay/snapshot · snd 2 s · rcv 10 ms
+</text>
+
+<!-- Recovery client -->
+<rect x="1060" y="530" width="375" height="325" rx="12" fill="#fff" stroke="#8a5fc0" stroke-width="2"/>
+<text x="1247" y="557" text-anchor="middle" font-size="14" font-weight="bold" fill="#5b3591">RECOVERY CLIENT</text>
+
+<rect x="1085" y="580" width="325" height="62" rx="8" fill="#f8f4fc" stroke="#8a5fc0"/>
+<text x="1247" y="603" text-anchor="middle" font-size="11" font-weight="bold">TCP request</text>
+<text x="1247" y="622" text-anchor="middle" font-size="10" fill="#666">R → replay · S → snapshot</text>
+
+<rect x="1085" y="660" width="325" height="72" rx="8" fill="#fff" stroke="#8a5fc0"/>
+<text x="1247" y="683" text-anchor="middle" font-size="11" font-weight="bold">Apply recovery</text>
+<text x="1247" y="701" text-anchor="middle" font-size="10" fill="#444">replay client_seq+1…last</text>
+<text x="1247" y="717" text-anchor="middle" font-size="10" fill="#444">or START → CLEAR → AddOrder → END</text>
+
+<rect x="1085" y="750" width="325" height="62" rx="8" fill="#f8f4fc" stroke="#8a5fc0"/>
+<text x="1247" y="773" text-anchor="middle" font-size="11" font-weight="bold">Resume live UDP</text>
+<text x="1247" y="792" text-anchor="middle" font-size="10" fill="#444">continue from recovered last_seq</text>
+
+<path d="M1060 610 H1020" fill="none" stroke="#8a5fc0" stroke-width="2.5" marker-end="url(#p)"/>
+<text x="1038" y="600" text-anchor="middle" font-size="9.5" fill="#8a5fc0">R / S</text>
+<path d="M935 824 H1060" fill="none" stroke="#8a5fc0" stroke-width="2.5" marker-end="url(#p)"/>
+<text x="998" y="815" text-anchor="middle" font-size="9.5" fill="#8a5fc0">TCP reply</text>
+
+<!-- Legend -->
+<rect x="35" y="900" width="1430" height="32" rx="7" fill="#fff" stroke="#ccc"/>
+<line x1="58" y1="916" x2="90" y2="916" stroke="#1a5fb4" stroke-width="2.5" marker-end="url(#b)"/>
+<text x="100" y="920" font-size="10.5" fill="#333">Live / UDP</text>
+<line x1="190" y1="916" x2="222" y2="916" stroke="#8a5fc0" stroke-width="2.5" marker-end="url(#p)"/>
+<text x="232" y="920" font-size="10.5" fill="#333">Recovery / TCP</text>
+<text x="380" y="920" font-size="10.5" fill="#555">Matching engine → marketUpdateQ → publisher → UDP subscribers.</text>
+</svg>

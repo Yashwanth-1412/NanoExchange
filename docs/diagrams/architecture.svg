@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760" font-family="DejaVu Sans, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#444"/>
+    </marker>
+    <marker id="arrBlue" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#1a5fb4"/>
+    </marker>
+    <marker id="arrGreen" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrGray" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3.5 L0,7 Z" fill="#999"/>
+    </marker>
+  </defs>
+
+  <!-- ================= TITLE ================= -->
+  <text x="590" y="34" text-anchor="middle" font-size="22" font-weight="bold" fill="#222">NanoExchange — Thread Architecture</text>
+
+  <!-- ================= EXCHANGE FRAME ================= -->
+  <rect x="30" y="60" width="920" height="660" rx="14" fill="#f7f9fc" stroke="#8aa3c0" stroke-width="2"/>
+  <text x="490" y="700" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a6b80" letter-spacing="4">TRADING EXCHANGE</text>
+
+  <!-- ================= GATEWAY THREAD ================= -->
+  <rect x="70" y="90" width="840" height="150" rx="10" fill="#fdf3d7" stroke="#c9a227" stroke-width="2"/>
+  <text x="90" y="116" font-size="14" font-weight="bold" fill="#7a5c00">ORDER GATEWAY THREAD</text>
+  <text x="890" y="116" text-anchor="end" font-size="12" fill="#7a5c00">pinned core</text>
+
+  <rect x="110" y="132" width="230" height="86" rx="8" fill="#fff" stroke="#b48b1e" stroke-width="1.5"/>
+  <text x="225" y="168" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">TCP connection</text>
+  <text x="225" y="188" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">manager (epoll)</text>
+
+  <rect x="375" y="132" width="230" height="86" rx="8" fill="#fff" stroke="#b48b1e" stroke-width="1.5"/>
+  <text x="490" y="162" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">OUCH protocol</text>
+  <text x="490" y="182" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">decoder + encoder</text>
+  <text x="490" y="204" text-anchor="middle" font-size="11" fill="#777">token → internal order id</text>
+
+  <rect x="640" y="132" width="230" height="86" rx="8" fill="#fff" stroke="#b48b1e" stroke-width="1.5"/>
+  <text x="755" y="172" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">FIFO sequencer</text>
+  <text x="755" y="196" text-anchor="middle" font-size="11" fill="#777">batch sorted by kernel timestamp</text>
+
+  <line x1="340" y1="175" x2="371" y2="175" stroke="#444" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="605" y1="175" x2="636" y2="175" stroke="#444" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ================= MATCHING ENGINE THREAD ================= -->
+  <rect x="70" y="300" width="840" height="150" rx="10" fill="#fae3e3" stroke="#c05252" stroke-width="2"/>
+  <text x="90" y="326" font-size="14" font-weight="bold" fill="#7a2424">MATCHING ENGINE THREAD</text>
+  <text x="890" y="326" text-anchor="end" font-size="12" fill="#7a2424">pinned core</text>
+
+  <rect x="110" y="342" width="250" height="86" rx="8" fill="#fff" stroke="#a04040" stroke-width="1.5"/>
+  <text x="235" y="372" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">Dispatcher</text>
+  <text x="235" y="394" text-anchor="middle" font-size="11" fill="#777">NEW / CANCEL / MODIFY · per-ticker routing</text>
+
+  <rect x="400" y="342" width="470" height="86" rx="8" fill="#fff" stroke="#a04040" stroke-width="1.5"/>
+  <text x="635" y="366" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">Limit order books — one per ticker</text>
+  <rect x="500" y="378" width="130" height="22" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1"/>
+  <text x="565" y="393" text-anchor="middle" font-size="11" fill="#1b5e20">BIDS  11.90 …</text>
+  <rect x="640" y="378" width="130" height="22" fill="#ffebee" stroke="#c62828" stroke-width="1"/>
+  <text x="705" y="393" text-anchor="middle" font-size="11" fill="#b71c1c">ASKS  12.00 …</text>
+  <text x="635" y="420" text-anchor="middle" font-size="11" fill="#777">price-time priority · FIFO per level · object-pool orders</text>
+
+  <line x1="360" y1="385" x2="396" y2="385" stroke="#444" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ================= MARKET DATA PUBLISHER THREAD ================= -->
+  <rect x="70" y="510" width="410" height="150" rx="10" fill="#e3e9f6" stroke="#4a6bb5" stroke-width="2"/>
+  <text x="90" y="536" font-size="14" font-weight="bold" fill="#274a86">MARKET DATA PUBLISHER</text>
+  <text x="90" y="554" font-size="12" fill="#274a86">THREAD · pinned core</text>
+
+  <rect x="110" y="566" width="330" height="74" rx="8" fill="#fff" stroke="#4a6bb5" stroke-width="1.5"/>
+  <text x="275" y="594" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">ITCH encoder + sequence numbers</text>
+  <text x="275" y="616" text-anchor="middle" font-size="11" fill="#777">encode once → UDP + snapshot streamer</text>
+
+  <!-- ================= SNAPSHOT STREAMER THREAD ================= -->
+  <rect x="520" y="510" width="390" height="150" rx="10" fill="#ece2f4" stroke="#8a5fc0" stroke-width="2"/>
+  <text x="540" y="536" font-size="14" font-weight="bold" fill="#5b3591">SNAPSHOT STREAMER THREAD</text>
+  <text x="890" y="536" text-anchor="end" font-size="12" fill="#5b3591">pinned core</text>
+
+  <rect x="540" y="548" width="170" height="92" rx="8" fill="#fff" stroke="#8a5fc0" stroke-width="1.5"/>
+  <text x="625" y="576" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">Shadow book</text>
+  <text x="625" y="596" text-anchor="middle" font-size="11" fill="#777">resting orders</text>
+  <text x="625" y="614" text-anchor="middle" font-size="11" fill="#777">+ replay ring (8192)</text>
+
+  <rect x="725" y="548" width="165" height="92" rx="8" fill="#fff" stroke="#8a5fc0" stroke-width="1.5"/>
+  <text x="807" y="576" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">Snapshot</text>
+  <text x="807" y="594" text-anchor="middle" font-size="13" font-weight="bold" fill="#333">synthesizer</text>
+  <text x="807" y="614" text-anchor="middle" font-size="11" fill="#777">TCP server (S / R)</text>
+
+  <line x1="710" y1="594" x2="721" y2="594" stroke="#444" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ================= LOGGER THREAD ================= -->
+  <rect x="990" y="300" width="160" height="150" rx="10" fill="#eef0f2" stroke="#8a939e" stroke-width="2"/>
+  <text x="1070" y="326" text-anchor="middle" font-size="14" font-weight="bold" fill="#4a525c">LOGGER</text>
+  <text x="1070" y="344" text-anchor="middle" font-size="12" fill="#4a525c">THREAD</text>
+  <rect x="1010" y="360" width="120" height="66" rx="8" fill="#fff" stroke="#8a939e" stroke-width="1.5"/>
+  <text x="1070" y="388" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Async writer</text>
+  <text x="1070" y="408" text-anchor="middle" font-size="10" fill="#777">MPSC queue</text>
+
+  <!-- ================= EXTERNAL ENTITIES ================= -->
+  <rect x="985" y="110" width="170" height="56" rx="8" fill="#fff" stroke="#555" stroke-width="1.5"/>
+  <text x="1070" y="134" text-anchor="middle" font-size="13" font-weight="bold" fill="#222">Order clients</text>
+  <text x="1070" y="152" text-anchor="middle" font-size="11" fill="#666">OUCH over TCP</text>
+
+  <rect x="985" y="560" width="170" height="56" rx="8" fill="#fff" stroke="#1a5fb4" stroke-width="1.5"/>
+  <text x="1070" y="584" text-anchor="middle" font-size="13" font-weight="bold" fill="#1a5fb4">UDP subscribers</text>
+  <text x="1070" y="602" text-anchor="middle" font-size="11" fill="#666">[seq][ITCH] datagrams</text>
+
+  <rect x="985" y="640" width="170" height="56" rx="8" fill="#fff" stroke="#5b3591" stroke-width="1.5"/>
+  <text x="1070" y="664" text-anchor="middle" font-size="13" font-weight="bold" fill="#5b3591">Recovery clients</text>
+  <text x="1070" y="682" text-anchor="middle" font-size="11" fill="#666">snapshot / replay over TCP</text>
+
+  <!-- ================= QUEUE EDGES ================= -->
+  <line x1="755" y1="218" x2="755" y2="268" stroke="#444" stroke-width="2.5"/>
+  <line x1="755" y1="268" x2="235" y2="268" stroke="#444" stroke-width="2.5"/>
+  <line x1="235" y1="268" x2="235" y2="338" stroke="#444" stroke-width="2.5" marker-end="url(#arr)"/>
+  <rect x="420" y="255" width="150" height="26" rx="13" fill="#222"/>
+  <text x="495" y="272" text-anchor="middle" font-size="12" fill="#fff">requestQ · SPSC</text>
+
+  <line x1="150" y1="342" x2="150" y2="268" stroke="#2e7d32" stroke-width="2.5"/>
+  <line x1="150" y1="268" x2="150" y2="222" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#arrGreen)"/>
+  <rect x="70" y="255" width="160" height="26" rx="13" fill="#2e7d32"/>
+  <text x="150" y="272" text-anchor="middle" font-size="12" fill="#fff">responseQ · SPSC</text>
+
+  <line x1="275" y1="450" x2="275" y2="480" stroke="#1a5fb4" stroke-width="2.5"/>
+  <line x1="275" y1="480" x2="275" y2="562" stroke="#1a5fb4" stroke-width="2.5" marker-end="url(#arrBlue)"/>
+  <rect x="175" y="467" width="200" height="26" rx="13" fill="#1a5fb4"/>
+  <text x="275" y="484" text-anchor="middle" font-size="12" fill="#fff">marketUpdateQ · SPSC</text>
+
+  <line x1="440" y1="603" x2="536" y2="603" stroke="#8a5fc0" stroke-width="2.5" marker-end="url(#arr)"/>
+  <rect x="450" y="590" width="70" height="26" rx="13" fill="#8a5fc0"/>
+  <text x="485" y="607" text-anchor="middle" font-size="11" fill="#fff">snapQ</text>
+
+  <!-- ================= NETWORK EDGES ================= -->
+  <line x1="985" y1="130" x2="914" y2="130" stroke="#444" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="914" y1="152" x2="985" y2="152" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#arrGreen)"/>
+  <text x="949" y="122" text-anchor="middle" font-size="10" fill="#444">orders</text>
+  <text x="949" y="170" text-anchor="middle" font-size="10" fill="#2e7d32">responses</text>
+
+  <polyline points="440,620 440,676 958,676 958,588 983,588" fill="none" stroke="#1a5fb4" stroke-width="2.5" marker-end="url(#arrBlue)"/>
+  <text x="700" y="668" text-anchor="middle" font-size="10" fill="#1a5fb4">ITCH + seq over UDP</text>
+
+  <line x1="910" y1="660" x2="985" y2="660" stroke="#5b3591" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="985" y1="682" x2="910" y2="682" stroke="#5b3591" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="947" y="652" text-anchor="middle" font-size="10" fill="#5b3591">snapshot / replay</text>
+  <text x="947" y="700" text-anchor="middle" font-size="10" fill="#5b3591">requests S / R</text>
+
+  <!-- ================= LOG EDGES (dotted) ================= -->
+  <line x1="910" y1="180" x2="1070" y2="296" stroke="#999" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#arrGray)"/>
+  <line x1="910" y1="375" x2="986" y2="375" stroke="#999" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#arrGray)"/>
+  <text x="960" y="250" font-size="10" fill="#999">logs</text>
+
+  <polyline points="480,600 480,705 1158,705 1158,430 1150,430" fill="none" stroke="#999" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#arrGray)"/>
+  <polyline points="910,600 910,715 1166,715 1166,440 1150,440" fill="none" stroke="#999" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#arrGray)"/>
+  <text x="700" y="718" font-size="10" fill="#999">logs</text>
+
+  <!-- ================= LEGEND ================= -->
+  <rect x="30" y="730" width="1120" height="26" rx="6" fill="#fff" stroke="#ccc"/>
+  <line x1="55" y1="743" x2="90" y2="743" stroke="#444" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="98" y="747" font-size="11" fill="#333">SPSC lock-free queue</text>
+  <line x1="245" y1="743" x2="280" y2="743" stroke="#1a5fb4" stroke-width="2.5" marker-end="url(#arrBlue)"/>
+  <text x="288" y="747" font-size="11" fill="#333">network out</text>
+  <line x1="390" y1="743" x2="425" y2="743" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#arrGreen)"/>
+  <text x="433" y="747" font-size="11" fill="#333">private responses</text>
+  <line x1="570" y1="743" x2="605" y2="743" stroke="#999" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#arrGray)"/>
+  <text x="613" y="747" font-size="11" fill="#333">async logging (MPSC)</text>
+  <text x="790" y="747" font-size="11" fill="#555">All queues single-producer / single-consumer · no mutexes on the order path</text>
+</svg>
